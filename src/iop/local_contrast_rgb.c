@@ -68,7 +68,7 @@
 #endif
 
 
-DT_MODULE_INTROSPECTION(3, dt_iop_local_contrast_rgb_params_t)
+DT_MODULE_INTROSPECTION(4, dt_iop_local_contrast_rgb_params_t)
 
 
 #define MIN_FLOAT exp2f(-16.0f)
@@ -90,6 +90,8 @@ typedef enum dt_iop_local_contrast_rgb_filter_t
 typedef struct dt_iop_local_contrast_rgb_params_t
 {
   // Local contrast scaling factor
+  float broad_scale;    // $MIN: 0.0 $MAX: 5.0 $DEFAULT: 1.0 $DESCRIPTION: "broad detail"
+  float extended_scale; // $MIN: 0.0 $MAX: 5.0 $DEFAULT: 1.0 $DESCRIPTION: "extended detail"
   float detail_scale;   // $MIN: 0.0 $MAX: 5.0 $DEFAULT: 1.5 $DESCRIPTION: "detail boost"
   float fine_scale;     // $MIN: 0.0 $MAX: 5.0 $DEFAULT: 1.0 $DESCRIPTION: "fine detail"
   float micro_scale;    // $MIN: 0.0 $MAX: 5.0 $DEFAULT: 1.0 $DESCRIPTION: "micro detail"
@@ -108,6 +110,8 @@ typedef struct dt_iop_local_contrast_rgb_params_t
 
 typedef struct dt_iop_local_contrast_rgb_data_t
 {
+  float broad_scale;
+  float extended_scale;
   float detail_scale;
   float fine_scale;
   float micro_scale;
@@ -115,6 +119,8 @@ typedef struct dt_iop_local_contrast_rgb_data_t
   float blending, feathering;
   float scale;
   int radius;
+  int radius_broad;
+  int radius_extended;
   int iterations;
   dt_iop_luminance_mask_method_t method;
   dt_iop_local_contrast_rgb_filter_t details;
@@ -130,9 +136,11 @@ typedef struct dt_iop_local_contrast_rgb_global_data_t
 typedef enum dt_iop_local_contrast_mask_t
 {
   DT_LC_MASK_OFF = 0,
-  DT_LC_MASK_DETAIL = 1,
-  DT_LC_MASK_FINE = 2,
-  DT_LC_MASK_MICRO = 3
+  DT_LC_MASK_BROAD = 1,
+  DT_LC_MASK_EXTENDED = 2,
+  DT_LC_MASK_DETAIL = 3,
+  DT_LC_MASK_FINE = 4,
+  DT_LC_MASK_MICRO = 5
 } dt_iop_local_contrast_mask_t;
 
 typedef struct dt_iop_local_contrast_rgb_gui_data_t
@@ -153,10 +161,14 @@ typedef struct dt_iop_local_contrast_rgb_gui_data_t
 
   // Cached luminance buffers
   float *thumb_preview_buf_pixel;     // pixel-wise luminance (no blur)
+  float *thumb_preview_buf_smoothed_broad;
+  float *thumb_preview_buf_smoothed_extended;
   float *thumb_preview_buf_smoothed;  // smoothed luminance
   float *thumb_preview_buf_smoothed_fine;
   float *thumb_preview_buf_smoothed_micro;
   float *full_preview_buf_pixel;
+  float *full_preview_buf_smoothed_broad;
+  float *full_preview_buf_smoothed_extended;
   float *full_preview_buf_smoothed;
   float *full_preview_buf_smoothed_fine;
   float *full_preview_buf_smoothed_micro;
@@ -165,7 +177,7 @@ typedef struct dt_iop_local_contrast_rgb_gui_data_t
   gboolean luminance_valid;
 
   // GTK widgets
-  GtkWidget *detail_scale, *fine_scale, *micro_scale, *global_scale;
+  GtkWidget *broad_scale, *extended_scale, *detail_scale, *fine_scale, *micro_scale, *global_scale;
   GtkWidget *blending;
   GtkWidget *method;
   GtkWidget *details, *feathering, *iterations;
@@ -227,6 +239,23 @@ int legacy_params(dt_iop_module_t *self,
     int iterations;
   } dt_iop_local_contrast_rgb_params_v2_t;
 
+  typedef struct dt_iop_local_contrast_rgb_params_v3_t
+  {
+    // Local contrast scaling factor
+    float detail_scale;
+    float fine_scale;
+    float micro_scale;
+    float global_scale;
+
+    // Masking parameters
+    float blending;
+    float feathering;
+
+    dt_iop_local_contrast_rgb_filter_t details;
+    dt_iop_luminance_mask_method_t method;
+    int iterations;
+  } dt_iop_local_contrast_rgb_params_v3_t;
+
   typedef struct dt_iop_local_contrast_rgb_params_v1_t
   {
     float detail_scale;
@@ -242,6 +271,8 @@ int legacy_params(dt_iop_module_t *self,
     const dt_iop_local_contrast_rgb_params_v1_t *o = (dt_iop_local_contrast_rgb_params_v1_t *)old_params;
     dt_iop_local_contrast_rgb_params_t *n = malloc(sizeof(dt_iop_local_contrast_rgb_params_t));
 
+    n->broad_scale = 1.0f;
+    n->extended_scale = 1.0f;
     n->detail_scale = o->detail_scale;
     n->fine_scale = 1.0f;
     n->micro_scale = 1.0f;
@@ -254,7 +285,7 @@ int legacy_params(dt_iop_module_t *self,
 
     *new_params = n;
     *new_params_size = sizeof(dt_iop_local_contrast_rgb_params_t);
-    *new_version = 3;
+    *new_version = 4;
     return 0;
   }
   if(old_version == 2)
@@ -262,6 +293,8 @@ int legacy_params(dt_iop_module_t *self,
     const dt_iop_local_contrast_rgb_params_v2_t *o = (dt_iop_local_contrast_rgb_params_v2_t *)old_params;
     dt_iop_local_contrast_rgb_params_t *n = malloc(sizeof(dt_iop_local_contrast_rgb_params_t));
 
+    n->broad_scale = 1.0f;
+    n->extended_scale = 1.0f;
     n->detail_scale = o->detail_scale;
     n->fine_scale = 1.0f;
     n->micro_scale = 1.0f;
@@ -274,7 +307,29 @@ int legacy_params(dt_iop_module_t *self,
 
     *new_params = n;
     *new_params_size = sizeof(dt_iop_local_contrast_rgb_params_t);
-    *new_version = 3;
+    *new_version = 4;
+    return 0;
+  }
+  if(old_version == 3)
+  {
+    const dt_iop_local_contrast_rgb_params_v3_t *o = (dt_iop_local_contrast_rgb_params_v3_t *)old_params;
+    dt_iop_local_contrast_rgb_params_t *n = malloc(sizeof(dt_iop_local_contrast_rgb_params_t));
+
+    n->broad_scale = 1.0f;
+    n->extended_scale = 1.0f;
+    n->detail_scale = o->detail_scale;
+    n->fine_scale = o->fine_scale;
+    n->micro_scale = o->micro_scale;
+    n->global_scale = o->global_scale;
+    n->blending = o->blending;
+    n->feathering = o->feathering;
+    n->details = o->details;
+    n->method = o->method;
+    n->iterations = o->iterations;
+
+    *new_params = n;
+    *new_params_size = sizeof(dt_iop_local_contrast_rgb_params_t);
+    *new_version = 4;
     return 0;
   }
   return 1;
@@ -386,6 +441,8 @@ __DT_CLONE_TARGETS__
 static inline void apply_local_contrast(const float *const restrict in,
                                         const float *const restrict luminance_pixel,
                                         const float *const restrict luminance_smoothed,
+                                        const float *const restrict luminance_smoothed_broad,
+                                        const float *const restrict luminance_smoothed_extended,
                                         const float *const restrict luminance_smoothed_fine,
                                         const float *const restrict luminance_smoothed_micro,
                                         float *const restrict out,
@@ -411,6 +468,22 @@ static inline void apply_local_contrast(const float *const restrict in,
 
     // The correction is the difference between scaled and original detail
     float correction_ev = scaled_detail_ev - detail_ev;
+
+    if(luminance_smoothed_broad)
+    {
+      const float lum_smoothed_broad = fmaxf(luminance_smoothed_broad[k], MIN_FLOAT);
+      const float detail_ev_broad = log2f(lum_pixel / lum_smoothed_broad);
+      const float scaled_detail_ev_broad = d->broad_scale * detail_ev_broad;
+      correction_ev += scaled_detail_ev_broad - detail_ev_broad;
+    }
+
+    if(luminance_smoothed_extended)
+    {
+      const float lum_smoothed_extended = fmaxf(luminance_smoothed_extended[k], MIN_FLOAT);
+      const float detail_ev_extended = log2f(lum_pixel / lum_smoothed_extended);
+      const float scaled_detail_ev_extended = d->extended_scale * detail_ev_extended;
+      correction_ev += scaled_detail_ev_extended - detail_ev_extended;
+    }
 
     if(luminance_smoothed_fine)
     {
@@ -492,6 +565,8 @@ static void local_contrast_process(dt_iop_module_t *self,
   const float *const restrict in = (float *const)ivoid;
   float *const restrict out = (float *const)ovoid;
   float *restrict luminance_pixel = NULL;
+  float *restrict luminance_smoothed_broad = NULL;
+  float *restrict luminance_smoothed_extended = NULL;
   float *restrict luminance_smoothed = NULL;
   float *restrict luminance_smoothed_fine = NULL;
   float *restrict luminance_smoothed_micro = NULL;
@@ -530,10 +605,14 @@ static void local_contrast_process(dt_iop_module_t *self,
       if(g->full_preview_buf_width != width || g->full_preview_buf_height != height)
       {
         dt_free_align(g->full_preview_buf_pixel);
+        dt_free_align(g->full_preview_buf_smoothed_broad);
+        dt_free_align(g->full_preview_buf_smoothed_extended);
         dt_free_align(g->full_preview_buf_smoothed);
         dt_free_align(g->full_preview_buf_smoothed_fine);
         dt_free_align(g->full_preview_buf_smoothed_micro);
         g->full_preview_buf_pixel = dt_alloc_align_float(num_elem);
+        g->full_preview_buf_smoothed_broad = dt_alloc_align_float(num_elem);
+        g->full_preview_buf_smoothed_extended = dt_alloc_align_float(num_elem);
         g->full_preview_buf_smoothed = dt_alloc_align_float(num_elem);
         g->full_preview_buf_smoothed_fine = dt_alloc_align_float(num_elem);
         g->full_preview_buf_smoothed_micro = dt_alloc_align_float(num_elem);
@@ -542,6 +621,8 @@ static void local_contrast_process(dt_iop_module_t *self,
       }
 
       luminance_pixel = g->full_preview_buf_pixel;
+      luminance_smoothed_broad = g->full_preview_buf_smoothed_broad;
+      luminance_smoothed_extended = g->full_preview_buf_smoothed_extended;
       luminance_smoothed = g->full_preview_buf_smoothed;
       luminance_smoothed_fine = g->full_preview_buf_smoothed_fine;
       luminance_smoothed_micro = g->full_preview_buf_smoothed_micro;
@@ -553,10 +634,14 @@ static void local_contrast_process(dt_iop_module_t *self,
       if(g->thumb_preview_buf_width != width || g->thumb_preview_buf_height != height)
       {
         dt_free_align(g->thumb_preview_buf_pixel);
+        dt_free_align(g->thumb_preview_buf_smoothed_broad);
+        dt_free_align(g->thumb_preview_buf_smoothed_extended);
         dt_free_align(g->thumb_preview_buf_smoothed);
         dt_free_align(g->thumb_preview_buf_smoothed_fine);
         dt_free_align(g->thumb_preview_buf_smoothed_micro);
         g->thumb_preview_buf_pixel = dt_alloc_align_float(num_elem);
+        g->thumb_preview_buf_smoothed_broad = dt_alloc_align_float(num_elem);
+        g->thumb_preview_buf_smoothed_extended = dt_alloc_align_float(num_elem);
         g->thumb_preview_buf_smoothed = dt_alloc_align_float(num_elem);
         g->thumb_preview_buf_smoothed_fine = dt_alloc_align_float(num_elem);
         g->thumb_preview_buf_smoothed_micro = dt_alloc_align_float(num_elem);
@@ -566,6 +651,8 @@ static void local_contrast_process(dt_iop_module_t *self,
       }
 
       luminance_pixel = g->thumb_preview_buf_pixel;
+      luminance_smoothed_broad = g->thumb_preview_buf_smoothed_broad;
+      luminance_smoothed_extended = g->thumb_preview_buf_smoothed_extended;
       luminance_smoothed = g->thumb_preview_buf_smoothed;
       luminance_smoothed_fine = g->thumb_preview_buf_smoothed_fine;
       luminance_smoothed_micro = g->thumb_preview_buf_smoothed_micro;
@@ -576,6 +663,8 @@ static void local_contrast_process(dt_iop_module_t *self,
     {
       luminance_pixel = dt_alloc_align_float(num_elem);
       luminance_smoothed = dt_alloc_align_float(num_elem);
+      luminance_smoothed_broad = dt_alloc_align_float(num_elem);
+      luminance_smoothed_extended = dt_alloc_align_float(num_elem);
       luminance_smoothed_fine = dt_alloc_align_float(num_elem);
       luminance_smoothed_micro = dt_alloc_align_float(num_elem);
     }
@@ -596,6 +685,8 @@ static void local_contrast_process(dt_iop_module_t *self,
     if(!cached)
     {
       dt_free_align(luminance_pixel);
+      dt_free_align(luminance_smoothed_broad);
+      dt_free_align(luminance_smoothed_extended);
       dt_free_align(luminance_smoothed);
       dt_free_align(luminance_smoothed_fine);
       dt_free_align(luminance_smoothed_micro);
@@ -618,6 +709,8 @@ static void local_contrast_process(dt_iop_module_t *self,
       if(hash != saved_hash || !luminance_valid)
       {
         compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_extended, width, height, d, d->radius_extended);
         compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
         compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2);
         compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4);
@@ -638,6 +731,8 @@ static void local_contrast_process(dt_iop_module_t *self,
         dt_iop_gui_enter_critical_section(self);
         g->thumb_preview_hash = hash;
         compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_extended, width, height, d, d->radius_extended);
         compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
         compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2);
         compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4);
@@ -649,6 +744,8 @@ static void local_contrast_process(dt_iop_module_t *self,
     else
     {
       compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
+      compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
+      compute_smoothed_luminance_mask(in, luminance_smoothed_extended, width, height, d, d->radius_extended);
       compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
       compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2);
       compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4);
@@ -666,6 +763,8 @@ static void local_contrast_process(dt_iop_module_t *self,
   if(g && g->mask_display != DT_LC_MASK_OFF)
   {
     float *lum_smooth = luminance_smoothed;
+    if(g->mask_display == DT_LC_MASK_BROAD) lum_smooth = luminance_smoothed_broad;
+    else if(g->mask_display == DT_LC_MASK_EXTENDED) lum_smooth = luminance_smoothed_extended;
     if(g->mask_display == DT_LC_MASK_FINE) lum_smooth = luminance_smoothed_fine;
     else if(g->mask_display == DT_LC_MASK_MICRO) lum_smooth = luminance_smoothed_micro;
 
@@ -674,7 +773,9 @@ static void local_contrast_process(dt_iop_module_t *self,
   }
   else
   {
-    apply_local_contrast(in, luminance_pixel, luminance_smoothed,
+    apply_local_contrast(in, luminance_pixel, luminance_smoothed, 
+                         d->broad_scale != 1.0f ? luminance_smoothed_broad : NULL,
+                         d->extended_scale != 1.0f ? luminance_smoothed_extended : NULL,
                          d->fine_scale != 1.0f ? luminance_smoothed_fine : NULL,
                          d->micro_scale != 1.0f ? luminance_smoothed_micro : NULL,
                          out, roi_in, roi_out, d);
@@ -683,6 +784,8 @@ static void local_contrast_process(dt_iop_module_t *self,
   if(!cached)
   {
     dt_free_align(luminance_pixel);
+    dt_free_align(luminance_smoothed_broad);
+    dt_free_align(luminance_smoothed_extended);
     dt_free_align(luminance_smoothed);
     dt_free_align(luminance_smoothed_fine);
     dt_free_align(luminance_smoothed_micro);
@@ -713,6 +816,14 @@ void modify_roi_in(dt_iop_module_t *self,
   const float diameter = d->blending * max_size * roi_in->scale;
   const int radius = (int)((diameter - 1.0f) / 2.0f);
   d->radius = radius;
+
+  const float blending_extended = (1.0f - d->blending) * 0.33f;
+  const float diameter_extended = blending_extended * max_size * roi_in->scale;
+  d->radius_extended = (int)((diameter_extended - 1.0f) / 2.0f);
+
+  const float blending_broad = (1.0f - d->blending) * 0.66f;
+  const float diameter_broad = blending_broad * max_size * roi_in->scale;
+  d->radius_broad = (int)((diameter_broad - 1.0f) / 2.0f);
 }
 
 
@@ -741,6 +852,8 @@ void commit_params(dt_iop_module_t *self,
   d->method = p->method;
   d->details = p->details;
   d->iterations = p->iterations;
+  d->broad_scale = p->broad_scale;
+  d->extended_scale = p->extended_scale;
   d->detail_scale = p->detail_scale;
   d->fine_scale = p->fine_scale;
   d->micro_scale = p->micro_scale;
@@ -787,6 +900,8 @@ static void gui_cache_init(dt_iop_module_t *self)
   g->luminance_valid = FALSE;
 
   g->full_preview_buf_pixel = NULL;
+  g->full_preview_buf_smoothed_broad = NULL;
+  g->full_preview_buf_smoothed_extended = NULL;
   g->full_preview_buf_smoothed = NULL;
   g->full_preview_buf_smoothed_fine = NULL;
   g->full_preview_buf_smoothed_micro = NULL;
@@ -794,6 +909,8 @@ static void gui_cache_init(dt_iop_module_t *self)
   g->full_preview_buf_height = 0;
 
   g->thumb_preview_buf_pixel = NULL;
+  g->thumb_preview_buf_smoothed_broad = NULL;
+  g->thumb_preview_buf_smoothed_extended = NULL;
   g->thumb_preview_buf_smoothed = NULL;
   g->thumb_preview_buf_smoothed_fine = NULL;
   g->thumb_preview_buf_smoothed_micro = NULL;
@@ -823,6 +940,8 @@ void gui_update(dt_iop_module_t *self)
   show_guiding_controls(self);
   invalidate_luminance_cache(self);
 
+  dt_bauhaus_widget_set_quad_active(g->broad_scale, g->mask_display == DT_LC_MASK_BROAD);
+  dt_bauhaus_widget_set_quad_active(g->extended_scale, g->mask_display == DT_LC_MASK_EXTENDED);
   dt_bauhaus_widget_set_quad_active(g->detail_scale, g->mask_display == DT_LC_MASK_DETAIL);
   dt_bauhaus_widget_set_quad_active(g->fine_scale, g->mask_display == DT_LC_MASK_FINE);
   dt_bauhaus_widget_set_quad_active(g->micro_scale, g->mask_display == DT_LC_MASK_MICRO);
@@ -856,6 +975,8 @@ static void _quad_callback(GtkWidget *quad, dt_iop_module_t *self)
   {
     dt_control_log(_("cannot display masks when the blending mask is displayed"));
     g->mask_display = DT_LC_MASK_OFF;
+    dt_bauhaus_widget_set_quad_active(g->broad_scale, FALSE);
+    dt_bauhaus_widget_set_quad_active(g->extended_scale, FALSE);
     dt_bauhaus_widget_set_quad_active(g->detail_scale, FALSE);
     dt_bauhaus_widget_set_quad_active(g->fine_scale, FALSE);
     dt_bauhaus_widget_set_quad_active(g->micro_scale, FALSE);
@@ -866,12 +987,16 @@ static void _quad_callback(GtkWidget *quad, dt_iop_module_t *self)
 
   if(dt_bauhaus_widget_get_quad_active(quad))
   {
+    if(quad == g->broad_scale) g->mask_display = DT_LC_MASK_BROAD;
+    else if(quad == g->extended_scale) g->mask_display = DT_LC_MASK_EXTENDED;
     if(quad == g->detail_scale) g->mask_display = DT_LC_MASK_DETAIL;
     else if(quad == g->fine_scale) g->mask_display = DT_LC_MASK_FINE;
     else if(quad == g->micro_scale) g->mask_display = DT_LC_MASK_MICRO;
   }
 
   // Ensure mutual exclusion
+  if(quad != g->broad_scale) dt_bauhaus_widget_set_quad_active(g->broad_scale, FALSE);
+  if(quad != g->extended_scale) dt_bauhaus_widget_set_quad_active(g->extended_scale, FALSE);
   if(quad != g->detail_scale) dt_bauhaus_widget_set_quad_active(g->detail_scale, FALSE);
   if(quad != g->fine_scale) dt_bauhaus_widget_set_quad_active(g->fine_scale, FALSE);
   if(quad != g->micro_scale) dt_bauhaus_widget_set_quad_active(g->micro_scale, FALSE);
@@ -895,6 +1020,8 @@ static void _develop_ui_pipe_started_callback(gpointer instance,
 
   ++darktable.gui->reset;
   dt_iop_gui_enter_critical_section(self);
+  dt_bauhaus_widget_set_quad_active(g->broad_scale, g->mask_display == DT_LC_MASK_BROAD);
+  dt_bauhaus_widget_set_quad_active(g->extended_scale, g->mask_display == DT_LC_MASK_EXTENDED);
   dt_bauhaus_widget_set_quad_active(g->detail_scale, g->mask_display == DT_LC_MASK_DETAIL);
   dt_bauhaus_widget_set_quad_active(g->fine_scale, g->mask_display == DT_LC_MASK_FINE);
   dt_bauhaus_widget_set_quad_active(g->micro_scale, g->mask_display == DT_LC_MASK_MICRO);
@@ -927,6 +1054,8 @@ void gui_focus(dt_iop_module_t *self, gboolean in)
     const gboolean mask_was_shown = (g->mask_display != DT_LC_MASK_OFF);
     g->mask_display = DT_LC_MASK_OFF;
 
+    dt_bauhaus_widget_set_quad_active(g->broad_scale, FALSE);
+    dt_bauhaus_widget_set_quad_active(g->extended_scale, FALSE);
     dt_bauhaus_widget_set_quad_active(g->detail_scale, FALSE);
     dt_bauhaus_widget_set_quad_active(g->fine_scale, FALSE);
     dt_bauhaus_widget_set_quad_active(g->micro_scale, FALSE);
@@ -950,6 +1079,24 @@ void gui_init(dt_iop_module_t *self)
 
   // Main container
   self->widget = dt_gui_vbox();
+
+  // Broad detail slider
+  g->broad_scale = dt_bauhaus_slider_from_params(self, "broad_scale");
+  dt_bauhaus_slider_set_soft_range(g->broad_scale, 0.25, 3.0);
+  dt_bauhaus_slider_set_digits(g->broad_scale, 2);
+  gtk_widget_set_tooltip_text(g->broad_scale, _("amount of broad detail enhancement"));
+  dt_bauhaus_widget_set_quad(g->broad_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
+                             _("visualize broad detail mask"));
+  dt_gui_box_add(self->widget, g->broad_scale);
+
+  // Extended detail slider
+  g->extended_scale = dt_bauhaus_slider_from_params(self, "extended_scale");
+  dt_bauhaus_slider_set_soft_range(g->extended_scale, 0.25, 3.0);
+  dt_bauhaus_slider_set_digits(g->extended_scale, 2);
+  gtk_widget_set_tooltip_text(g->extended_scale, _("amount of extended detail enhancement"));
+  dt_bauhaus_widget_set_quad(g->extended_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
+                             _("visualize extended detail mask"));
+  dt_gui_box_add(self->widget, g->extended_scale);
 
   // Detail boost slider
   g->detail_scale = dt_bauhaus_slider_from_params(self, "detail_scale");
@@ -1047,10 +1194,14 @@ void gui_cleanup(dt_iop_module_t *self)
   dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
 
   dt_free_align(g->thumb_preview_buf_pixel);
+  dt_free_align(g->thumb_preview_buf_smoothed_broad);
+  dt_free_align(g->thumb_preview_buf_smoothed_extended);
   dt_free_align(g->thumb_preview_buf_smoothed);
   dt_free_align(g->thumb_preview_buf_smoothed_fine);
   dt_free_align(g->thumb_preview_buf_smoothed_micro);
   dt_free_align(g->full_preview_buf_pixel);
+  dt_free_align(g->full_preview_buf_smoothed_broad);
+  dt_free_align(g->full_preview_buf_smoothed_extended);
   dt_free_align(g->full_preview_buf_smoothed);
   dt_free_align(g->full_preview_buf_smoothed_fine);
   dt_free_align(g->full_preview_buf_smoothed_micro);

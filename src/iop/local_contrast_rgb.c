@@ -127,10 +127,18 @@ typedef struct dt_iop_local_contrast_rgb_global_data_t
 } dt_iop_local_contrast_rgb_global_data_t;
 
 
+typedef enum dt_iop_local_contrast_mask_t
+{
+  DT_LC_MASK_OFF = 0,
+  DT_LC_MASK_DETAIL = 1,
+  DT_LC_MASK_FINE = 2,
+  DT_LC_MASK_MICRO = 3
+} dt_iop_local_contrast_mask_t;
+
 typedef struct dt_iop_local_contrast_rgb_gui_data_t
 {
   // Flags
-  gboolean mask_display;
+  dt_iop_local_contrast_mask_t mask_display;
 
   // Buffer dimensions
   int buf_width;
@@ -161,7 +169,6 @@ typedef struct dt_iop_local_contrast_rgb_gui_data_t
   GtkWidget *blending;
   GtkWidget *method;
   GtkWidget *details, *feathering, *iterations;
-  GtkWidget *show_luminance_mask;
 } dt_iop_local_contrast_rgb_gui_data_t;
 
 
@@ -656,18 +663,14 @@ static void local_contrast_process(dt_iop_module_t *self,
   }
 
   // Display output
-  if(self->dev->gui_attached && (piece->pipe->type & DT_DEV_PIXELPIPE_FULL))
+  if(g && g->mask_display != DT_LC_MASK_OFF)
   {
-    if(g->mask_display)
-    {
-      display_detail_mask(luminance_pixel, luminance_smoothed, out, width, height);
-      piece->pipe->mask_display = DT_DEV_PIXELPIPE_DISPLAY_PASSTHRU;
-    }
-    else
-      apply_local_contrast(in, luminance_pixel, luminance_smoothed,
-                           d->fine_scale != 1.0f ? luminance_smoothed_fine : NULL,
-                           d->micro_scale != 1.0f ? luminance_smoothed_micro : NULL,
-                           out, roi_in, roi_out, d);
+    float *lum_smooth = luminance_smoothed;
+    if(g->mask_display == DT_LC_MASK_FINE) lum_smooth = luminance_smoothed_fine;
+    else if(g->mask_display == DT_LC_MASK_MICRO) lum_smooth = luminance_smoothed_micro;
+
+    display_detail_mask(luminance_pixel, lum_smooth, out, width, height);
+    piece->pipe->mask_display = DT_DEV_PIXELPIPE_DISPLAY_PASSTHRU;
   }
   else
   {
@@ -780,7 +783,7 @@ static void gui_cache_init(dt_iop_module_t *self)
   dt_iop_gui_enter_critical_section(self);
   g->ui_preview_hash = DT_INVALID_HASH;
   g->thumb_preview_hash = DT_INVALID_HASH;
-  g->mask_display = FALSE;
+  g->mask_display = DT_LC_MASK_OFF;
   g->luminance_valid = FALSE;
 
   g->full_preview_buf_pixel = NULL;
@@ -820,7 +823,9 @@ void gui_update(dt_iop_module_t *self)
   show_guiding_controls(self);
   invalidate_luminance_cache(self);
 
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_luminance_mask), g->mask_display);
+  dt_bauhaus_widget_set_quad_active(g->detail_scale, g->mask_display == DT_LC_MASK_DETAIL);
+  dt_bauhaus_widget_set_quad_active(g->fine_scale, g->mask_display == DT_LC_MASK_FINE);
+  dt_bauhaus_widget_set_quad_active(g->micro_scale, g->mask_display == DT_LC_MASK_MICRO);
 }
 
 
@@ -841,29 +846,36 @@ void gui_changed(dt_iop_module_t *self,
 }
 
 
-static void show_luminance_mask_callback(GtkWidget *togglebutton,
-                                         GdkEventButton *event,
-                                         dt_iop_module_t *self)
+static void _quad_callback(GtkWidget *quad, dt_iop_module_t *self)
 {
   if(darktable.gui->reset) return;
-  dt_iop_request_focus(self);
-
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(self->off), TRUE);
-
   dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
 
   // If blend module is displaying mask, don't display here
   if(self->request_mask_display)
   {
     dt_control_log(_("cannot display masks when the blending mask is displayed"));
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_luminance_mask), FALSE);
-    g->mask_display = FALSE;
+    g->mask_display = DT_LC_MASK_OFF;
+    dt_bauhaus_widget_set_quad_active(g->detail_scale, FALSE);
+    dt_bauhaus_widget_set_quad_active(g->fine_scale, FALSE);
+    dt_bauhaus_widget_set_quad_active(g->micro_scale, FALSE);
     return;
   }
-  else
-    g->mask_display = !g->mask_display;
 
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_luminance_mask), g->mask_display);
+  g->mask_display = DT_LC_MASK_OFF;
+
+  if(dt_bauhaus_widget_get_quad_active(quad))
+  {
+    if(quad == g->detail_scale) g->mask_display = DT_LC_MASK_DETAIL;
+    else if(quad == g->fine_scale) g->mask_display = DT_LC_MASK_FINE;
+    else if(quad == g->micro_scale) g->mask_display = DT_LC_MASK_MICRO;
+  }
+
+  // Ensure mutual exclusion
+  if(quad != g->detail_scale) dt_bauhaus_widget_set_quad_active(g->detail_scale, FALSE);
+  if(quad != g->fine_scale) dt_bauhaus_widget_set_quad_active(g->fine_scale, FALSE);
+  if(quad != g->micro_scale) dt_bauhaus_widget_set_quad_active(g->micro_scale, FALSE);
+
   dt_iop_refresh_center(self);
 }
 
@@ -877,13 +889,15 @@ static void _develop_ui_pipe_started_callback(gpointer instance,
   if(!self->expanded || !self->enabled)
   {
     dt_iop_gui_enter_critical_section(self);
-    g->mask_display = FALSE;
+    g->mask_display = DT_LC_MASK_OFF;
     dt_iop_gui_leave_critical_section(self);
   }
 
   ++darktable.gui->reset;
   dt_iop_gui_enter_critical_section(self);
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_luminance_mask), g->mask_display);
+  dt_bauhaus_widget_set_quad_active(g->detail_scale, g->mask_display == DT_LC_MASK_DETAIL);
+  dt_bauhaus_widget_set_quad_active(g->fine_scale, g->mask_display == DT_LC_MASK_FINE);
+  dt_bauhaus_widget_set_quad_active(g->micro_scale, g->mask_display == DT_LC_MASK_MICRO);
   dt_iop_gui_leave_critical_section(self);
   --darktable.gui->reset;
 }
@@ -902,6 +916,23 @@ static void _develop_ui_pipe_finished_callback(gpointer instance,
 {
   const dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
   if(g == NULL) return;
+}
+
+
+void gui_focus(dt_iop_module_t *self, gboolean in)
+{
+  dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  if(!in)
+  {
+    const gboolean mask_was_shown = (g->mask_display != DT_LC_MASK_OFF);
+    g->mask_display = DT_LC_MASK_OFF;
+
+    dt_bauhaus_widget_set_quad_active(g->detail_scale, FALSE);
+    dt_bauhaus_widget_set_quad_active(g->fine_scale, FALSE);
+    dt_bauhaus_widget_set_quad_active(g->micro_scale, FALSE);
+
+    if(mask_was_shown) dt_dev_reprocess_center(self->dev);
+  }
 }
 
 
@@ -930,12 +961,16 @@ void gui_init(dt_iop_module_t *self)
        "1.0 = no change\n"
        "> 1.0 = boost local contrast\n"
        "< 1.0 = reduce local contrast"));
+  dt_bauhaus_widget_set_quad(g->detail_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
+                             _("visualize local contrast mask"));
 
 // Fine detail slider
   g->fine_scale = dt_bauhaus_slider_from_params(self, "fine_scale");
   dt_bauhaus_slider_set_soft_range(g->fine_scale, 0.25, 3.0);
   dt_bauhaus_slider_set_digits(g->fine_scale, 2);
   gtk_widget_set_tooltip_text(g->fine_scale, _("amount of fine detail enhancement"));
+  dt_bauhaus_widget_set_quad(g->fine_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
+                             _("visualize fine detail mask"));
   dt_gui_box_add(self->widget, g->fine_scale);
 
   // Micro detail slider
@@ -943,6 +978,8 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_soft_range(g->micro_scale, 0.25, 3.0);
   dt_bauhaus_slider_set_digits(g->micro_scale, 2);
   gtk_widget_set_tooltip_text(g->micro_scale, _("amount of micro detail enhancement"));
+  dt_bauhaus_widget_set_quad(g->micro_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
+                             _("visualize micro detail mask"));
   dt_gui_box_add(self->widget, g->micro_scale);
 
   // Global contrast slider
@@ -997,20 +1034,6 @@ void gui_init(dt_iop_module_t *self)
        "'guided filter' is good for general use\n"
        "'EIGF' (exposure-independent guided filter) treats shadows and highlights equally\n"
        "'averaged' variants blend with unfiltered for softer effect"));
-
-  // Display mask toggle
-  g->show_luminance_mask = dt_iop_togglebutton_new
-    (self, NULL,
-     N_("display detail mask"), NULL, G_CALLBACK(show_luminance_mask_callback),
-     FALSE, 0, 0, dtgtk_cairo_paint_showmask, NULL);
-  dt_gui_add_class(g->show_luminance_mask, "dt_transparent_background");
-  dtgtk_togglebutton_set_paint(DTGTK_TOGGLEBUTTON(g->show_luminance_mask),
-                               dtgtk_cairo_paint_showmask, 0, NULL);
-  dt_gui_add_class(g->show_luminance_mask, "dt_bauhaus_alignment");
-
-  GtkWidget *hbox = dt_gui_hbox(dt_gui_expand(dt_ui_label_new(_("display detail mask"))),
-                                g->show_luminance_mask);
-  dt_gui_box_add(self->widget, hbox);
 
   // Connect signals for pipe events
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_PREVIEW_PIPE_FINISHED, _develop_preview_pipe_finished_callback);

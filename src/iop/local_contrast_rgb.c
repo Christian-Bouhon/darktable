@@ -68,7 +68,7 @@
 #endif
 
 
-DT_MODULE_INTROSPECTION(4, dt_iop_local_contrast_rgb_params_t)
+DT_MODULE_INTROSPECTION(1, dt_iop_local_contrast_rgb_params_t)
 
 
 #define MIN_FLOAT exp2f(-16.0f)
@@ -219,120 +219,6 @@ dt_iop_colorspace_type_t default_colorspace(dt_iop_module_t *self,
                                             dt_dev_pixelpipe_iop_t *piece)
 {
   return IOP_CS_RGB;
-}
-
-int legacy_params(dt_iop_module_t *self,
-                  const void *const old_params,
-                  const int old_version,
-                  void **new_params,
-                  int32_t *new_params_size,
-                  int *new_version)
-{
-  typedef struct dt_iop_local_contrast_rgb_params_v2_t
-  {
-    float detail_scale;
-    float global_scale;
-    float blending;
-    float feathering;
-    dt_iop_local_contrast_rgb_filter_t details;
-    dt_iop_luminance_mask_method_t method;
-    int iterations;
-  } dt_iop_local_contrast_rgb_params_v2_t;
-
-  typedef struct dt_iop_local_contrast_rgb_params_v3_t
-  {
-    // Local contrast scaling factor
-    float detail_scale;
-    float fine_scale;
-    float micro_scale;
-    float global_scale;
-
-    // Masking parameters
-    float blending;
-    float feathering;
-
-    dt_iop_local_contrast_rgb_filter_t details;
-    dt_iop_luminance_mask_method_t method;
-    int iterations;
-  } dt_iop_local_contrast_rgb_params_v3_t;
-
-  typedef struct dt_iop_local_contrast_rgb_params_v1_t
-  {
-    float detail_scale;
-    float blending;
-    float feathering;
-    dt_iop_local_contrast_rgb_filter_t details;
-    dt_iop_luminance_mask_method_t method;
-    int iterations;
-  } dt_iop_local_contrast_rgb_params_v1_t;
-
-  if(old_version == 1)
-  {
-    const dt_iop_local_contrast_rgb_params_v1_t *o = (dt_iop_local_contrast_rgb_params_v1_t *)old_params;
-    dt_iop_local_contrast_rgb_params_t *n = malloc(sizeof(dt_iop_local_contrast_rgb_params_t));
-
-    n->broad_scale = 1.0f;
-    n->medium_scale = 1.0f;
-    n->detail_scale = o->detail_scale;
-    n->fine_scale = 1.0f;
-    n->micro_scale = 1.0f;
-    n->global_scale = 1.0f;
-    n->blending = o->blending;
-    n->feathering = o->feathering;
-    n->details = o->details;
-    n->method = o->method;
-    n->iterations = o->iterations;
-
-    *new_params = n;
-    *new_params_size = sizeof(dt_iop_local_contrast_rgb_params_t);
-    *new_version = 4;
-    return 0;
-  }
-  if(old_version == 2)
-  {
-    const dt_iop_local_contrast_rgb_params_v2_t *o = (dt_iop_local_contrast_rgb_params_v2_t *)old_params;
-    dt_iop_local_contrast_rgb_params_t *n = malloc(sizeof(dt_iop_local_contrast_rgb_params_t));
-
-    n->broad_scale = 1.0f;
-    n->medium_scale = 1.0f;
-    n->detail_scale = o->detail_scale;
-    n->fine_scale = 1.0f;
-    n->micro_scale = 1.0f;
-    n->global_scale = o->global_scale;
-    n->blending = o->blending;
-    n->feathering = o->feathering;
-    n->details = o->details;
-    n->method = o->method;
-    n->iterations = o->iterations;
-
-    *new_params = n;
-    *new_params_size = sizeof(dt_iop_local_contrast_rgb_params_t);
-    *new_version = 4;
-    return 0;
-  }
-  if(old_version == 3)
-  {
-    const dt_iop_local_contrast_rgb_params_v3_t *o = (dt_iop_local_contrast_rgb_params_v3_t *)old_params;
-    dt_iop_local_contrast_rgb_params_t *n = malloc(sizeof(dt_iop_local_contrast_rgb_params_t));
-
-    n->broad_scale = 1.0f;
-    n->medium_scale = 1.0f;
-    n->detail_scale = o->detail_scale;
-    n->fine_scale = o->fine_scale;
-    n->micro_scale = o->micro_scale;
-    n->global_scale = o->global_scale;
-    n->blending = o->blending;
-    n->feathering = o->feathering;
-    n->details = o->details;
-    n->method = o->method;
-    n->iterations = o->iterations;
-
-    *new_params = n;
-    *new_params_size = sizeof(dt_iop_local_contrast_rgb_params_t);
-    *new_version = 4;
-    return 0;
-  }
-  return 1;
 }
 
 /**
@@ -673,13 +559,15 @@ static void local_contrast_process(dt_iop_module_t *self,
   {
     // No interactive editing: allocate local temp buffers
     luminance_pixel = dt_alloc_align_float(num_elem);
+    luminance_smoothed_broad = dt_alloc_align_float(num_elem);
+    luminance_smoothed_medium = dt_alloc_align_float(num_elem);
     luminance_smoothed = dt_alloc_align_float(num_elem);
     luminance_smoothed_fine = dt_alloc_align_float(num_elem);
     luminance_smoothed_micro = dt_alloc_align_float(num_elem);
   }
 
   // Check buffer allocation
-  if(!luminance_pixel || !luminance_smoothed || !luminance_smoothed_fine || !luminance_smoothed_micro)
+  if(!luminance_pixel || !luminance_smoothed_broad || !luminance_smoothed_medium || !luminance_smoothed || !luminance_smoothed_fine || !luminance_smoothed_micro)
   {
     dt_control_log(_("local contrast failed to allocate memory, check your RAM settings"));
     if(!cached)
@@ -754,6 +642,8 @@ static void local_contrast_process(dt_iop_module_t *self,
   else
   {
     compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
+    compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
+    compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
     compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
     compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2);
     compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4);

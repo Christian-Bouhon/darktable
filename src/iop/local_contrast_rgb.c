@@ -68,7 +68,7 @@
 #endif
 
 
-DT_MODULE_INTROSPECTION(3, dt_iop_local_contrast_rgb_params_t)
+DT_MODULE_INTROSPECTION(1, dt_iop_local_contrast_rgb_params_t)
 
 
 #define MIN_FLOAT exp2f(-16.0f)
@@ -100,11 +100,11 @@ typedef struct dt_iop_local_contrast_rgb_params_t
   // Masking parameters
   // Blending is log-encoded because changes in small values are more noticeable
   float blending;       // $MIN: 1.0 $MAX: 4.0 $DEFAULT: 1.2 $DESCRIPTION: "feature scale"
-  float feathering_broad; // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "broad feathering"
-  float feathering_medium; // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "medium feathering"
-  float feathering_detail; // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "detail feathering"
-  float feathering_fine; // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "fine feathering"
-  float feathering_micro; // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "micro feathering"
+  float feathering;     // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "edges refinement/feathering"
+
+  dt_iop_local_contrast_rgb_filter_t details; // $DEFAULT: DT_LC_EIGF $DESCRIPTION: "feature extractor"
+  dt_iop_luminance_mask_method_t method;      // $DEFAULT: DT_TONEEQ_NORM_2 $DESCRIPTION: "luminance estimator"
+  int iterations;       // $MIN: 1 $MAX: 20 $DEFAULT: 1 $DESCRIPTION: "filter diffusion"
 } dt_iop_local_contrast_rgb_params_t;
 
 
@@ -116,12 +116,7 @@ typedef struct dt_iop_local_contrast_rgb_data_t
   float fine_scale;
   float micro_scale;
   float global_scale;
-  float blending;
-  float feathering_broad;
-  float feathering_medium;
-  float feathering_detail;
-  float feathering_fine;
-  float feathering_micro;
+  float blending, feathering;
   float scale;
   int radius;
   int radius_broad;
@@ -186,8 +181,8 @@ typedef struct dt_iop_local_contrast_rgb_gui_data_t
   // GTK widgets
   GtkWidget *broad_scale, *medium_scale, *detail_scale, *fine_scale, *micro_scale, *global_scale;
   GtkWidget *blending;
-  GtkWidget *feathering_broad, *feathering_medium, *feathering_detail, *feathering_fine, *feathering_micro;
-  dt_gui_collapsible_section_t feathering_section;
+  GtkWidget *method;
+  GtkWidget *details, *feathering, *iterations;
 } dt_iop_local_contrast_rgb_gui_data_t;
 
 
@@ -226,78 +221,6 @@ dt_iop_colorspace_type_t default_colorspace(dt_iop_module_t *self,
                                             dt_dev_pixelpipe_iop_t *piece)
 {
   return IOP_CS_RGB;
-}
-
-int legacy_params(dt_iop_module_t *self,
-                  const void *const old_params,
-                  const int old_version,
-                  void **new_params,
-                  int32_t *new_params_size,
-                  int *new_version)
-{
-  typedef struct dt_iop_local_contrast_rgb_params_v1_t
-  {
-    float broad_scale;
-    float medium_scale;
-    float detail_scale;
-    float fine_scale;
-    float micro_scale;
-    float global_scale;
-    float blending;
-    float feathering;
-    dt_iop_local_contrast_rgb_filter_t details;
-    dt_iop_luminance_mask_method_t method;
-    int iterations;
-  } dt_iop_local_contrast_rgb_params_v1_t;
-
-  typedef struct dt_iop_local_contrast_rgb_params_v2_t
-  {
-    float broad_scale;
-    float medium_scale;
-    float detail_scale;
-    float fine_scale;
-    float micro_scale;
-    float global_scale;
-    float blending;
-    float feathering;
-  } dt_iop_local_contrast_rgb_params_v2_t;
-
-  if(old_version == 2)
-  {
-    const dt_iop_local_contrast_rgb_params_v2_t *o = (dt_iop_local_contrast_rgb_params_v2_t *)old_params;
-    dt_iop_local_contrast_rgb_params_t *n = malloc(sizeof(dt_iop_local_contrast_rgb_params_t));
-
-    memcpy(n, o, sizeof(dt_iop_local_contrast_rgb_params_v2_t)); // copies scales and blending
-    n->feathering_broad = o->feathering;
-    n->feathering_medium = o->feathering;
-    n->feathering_detail = o->feathering;
-    n->feathering_fine = o->feathering;
-    n->feathering_micro = o->feathering;
-
-    *new_params = n;
-    *new_params_size = sizeof(dt_iop_local_contrast_rgb_params_t);
-    *new_version = 3;
-    return 0;
-  }
-  if(old_version == 1)
-  {
-    const dt_iop_local_contrast_rgb_params_v1_t *o = (dt_iop_local_contrast_rgb_params_v1_t *)old_params;
-    dt_iop_local_contrast_rgb_params_t *n = malloc(sizeof(dt_iop_local_contrast_rgb_params_t));
-
-    memcpy(n, o, sizeof(dt_iop_local_contrast_rgb_params_t));
-
-    n->feathering_broad = o->feathering;
-    n->feathering_medium = o->feathering;
-    n->feathering_detail = o->feathering;
-    n->feathering_fine = o->feathering;
-    n->feathering_micro = o->feathering;
-
-    *new_params = n;
-    *new_params_size = sizeof(dt_iop_local_contrast_rgb_params_t);
-    *new_version = 3;
-    return 0;
-  }
-  return 1;
 }
 
 /**
@@ -351,8 +274,7 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
                                                    const size_t width,
                                                    const size_t height,
                                                 const dt_iop_local_contrast_rgb_data_t *const d,
-                                                const int radius,
-                                                const float feathering)
+                                                const int radius)
 {
   // First compute pixel-wise luminance (no boost)
   luminance_mask(in, luminance, width, height, d->method, 1.0f, 0.0f, 1.0f);
@@ -362,7 +284,7 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
   {
     case(DT_LC_AVG_GUIDED):
     {
-      fast_surface_blur(luminance, width, height, radius, feathering, d->iterations,
+      fast_surface_blur(luminance, width, height, radius, d->feathering, d->iterations,
                         DT_GF_BLENDING_GEOMEAN, d->scale, 0.0f,
                         exp2f(-14.0f), 4.0f);
       break;
@@ -370,7 +292,7 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
 
     case(DT_LC_GUIDED):
     {
-      fast_surface_blur(luminance, width, height, radius, feathering, d->iterations,
+      fast_surface_blur(luminance, width, height, radius, d->feathering, d->iterations,
                         DT_GF_BLENDING_LINEAR, d->scale, 0.0f,
                         exp2f(-14.0f), 4.0f);
       break;
@@ -379,7 +301,7 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
     case(DT_LC_AVG_EIGF):
     {
       fast_eigf_surface_blur(luminance, width, height,
-                             radius, feathering, d->iterations,
+                             radius, d->feathering, d->iterations,
                              DT_GF_BLENDING_GEOMEAN, d->scale,
                              0.0f, exp2f(-14.0f), 4.0f);
       break;
@@ -388,7 +310,7 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
     case(DT_LC_EIGF):
     {
       fast_eigf_surface_blur(luminance, width, height,
-                             radius, feathering, d->iterations,
+                             radius, d->feathering, d->iterations,
                              DT_GF_BLENDING_LINEAR, d->scale,
                              0.0f, exp2f(-14.0f), 4.0f);
       break;
@@ -677,11 +599,11 @@ static void local_contrast_process(dt_iop_module_t *self,
       if(hash != saved_hash || !luminance_valid)
       {
         compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering_broad);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering_medium);
-        compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering_detail);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering_fine);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering_micro);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
+        compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro);
         hash_set_get(&hash, &g->ui_preview_hash, &self->gui_lock);
       }
     }
@@ -699,11 +621,11 @@ static void local_contrast_process(dt_iop_module_t *self,
         dt_iop_gui_enter_critical_section(self);
         g->thumb_preview_hash = hash;
         compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering_broad);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering_medium);
-        compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering_detail);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering_fine);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering_micro);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
+        compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro);
         g->luminance_valid = TRUE;
         dt_iop_gui_leave_critical_section(self);
         dt_dev_pixelpipe_cache_invalidate_later(piece->pipe, self->iop_order);
@@ -712,11 +634,11 @@ static void local_contrast_process(dt_iop_module_t *self,
     else
     {
       compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-      compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering_broad);
-      compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering_medium);
-      compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering_detail);
-      compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering_fine);
-      compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering_micro);
+      compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
+      compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
+      compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
+      compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2);
+      compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4);
     }
   }
   else
@@ -827,9 +749,9 @@ void commit_params(dt_iop_module_t *self,
   const dt_iop_local_contrast_rgb_params_t *p = (dt_iop_local_contrast_rgb_params_t *)p1;
   dt_iop_local_contrast_rgb_data_t *d = piece->data;
 
-  d->method = DT_TONEEQ_NORM_2;
-  d->details = DT_LC_EIGF;
-  d->iterations = 1;
+  d->method = p->method;
+  d->details = p->details;
+  d->iterations = p->iterations;
   d->broad_scale = p->broad_scale;
   d->medium_scale = p->medium_scale;
   d->detail_scale = p->detail_scale;
@@ -845,11 +767,7 @@ void commit_params(dt_iop_module_t *self,
 
   // UI guided filter feathering param increases edge taping
   // but actual regularization behaves inversely
-  d->feathering_broad = 1.0f / p->feathering_broad;
-  d->feathering_medium = 1.0f / p->feathering_medium;
-  d->feathering_detail = 1.0f / p->feathering_detail;
-  d->feathering_fine = 1.0f / p->feathering_fine;
-  d->feathering_micro = 1.0f / p->feathering_micro;
+  d->feathering = 1.0f / p->feathering;
 }
 
 
@@ -910,17 +828,14 @@ static void show_guiding_controls(const dt_iop_module_t *self)
 
   // All filters need these controls
   gtk_widget_set_visible(g->blending, TRUE);
-  gtk_widget_set_visible(g->feathering_broad, TRUE);
-  gtk_widget_set_visible(g->feathering_medium, TRUE);
-  gtk_widget_set_visible(g->feathering_detail, TRUE);
-  gtk_widget_set_visible(g->feathering_fine, TRUE);
-  gtk_widget_set_visible(g->feathering_micro, TRUE);
+  gtk_widget_set_visible(g->feathering, TRUE);
+  gtk_widget_set_visible(g->iterations, TRUE);
 }
 
 
 void gui_update(dt_iop_module_t *self)
 {
-  dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  const dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
 
   show_guiding_controls(self);
   invalidate_luminance_cache(self);
@@ -930,7 +845,6 @@ void gui_update(dt_iop_module_t *self)
   dt_bauhaus_widget_set_quad_active(g->detail_scale, g->mask_display == DT_LC_MASK_DETAIL);
   dt_bauhaus_widget_set_quad_active(g->fine_scale, g->mask_display == DT_LC_MASK_FINE);
   dt_bauhaus_widget_set_quad_active(g->micro_scale, g->mask_display == DT_LC_MASK_MICRO);
-  dt_gui_update_collapsible_section(&g->feathering_section);
 }
 
 
@@ -940,12 +854,11 @@ void gui_changed(dt_iop_module_t *self,
 {
   const dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
 
-  if(w == g->blending
-     || w == g->feathering_broad
-     || w == g->feathering_medium
-     || w == g->feathering_detail
-     || w == g->feathering_fine
-     || w == g->feathering_micro)
+  if(w == g->method
+     || w == g->blending
+     || w == g->feathering
+     || w == g->iterations
+     || w == g->details)
   {
     invalidate_luminance_cache(self);
   }
@@ -1136,44 +1049,37 @@ void gui_init(dt_iop_module_t *self)
        "larger = affects broader features\n"
        "smaller = affects finer details"));
 
-  dt_gui_new_collapsible_section(&g->feathering_section, "plugins/darkroom/local_contrast_rgb/feathering",
-                                 _("feathering"), GTK_BOX(self->widget), DT_ACTION(self));
-
-  g->feathering_broad = dt_bauhaus_slider_from_params(self, "feathering_broad");
-  dt_bauhaus_slider_set_soft_range(g->feathering_broad, 0.1, 50.0);
+  g->feathering = dt_bauhaus_slider_from_params(self, "feathering");
+  dt_bauhaus_slider_set_soft_range(g->feathering, 0.1, 50.0);
   gtk_widget_set_tooltip_text
-    (g->feathering_broad,
-     _("edge sensitivity of the filter for broad details"));
-  dt_gui_box_add(g->feathering_section.container, g->feathering_broad);
+    (g->feathering,
+     _("edge sensitivity of the filter\n"
+       "higher = better edge preservation\n"
+       "lower = smoother transitions, but may lead to halos around edges"));
 
-  g->feathering_medium = dt_bauhaus_slider_from_params(self, "feathering_medium");
-  dt_bauhaus_slider_set_soft_range(g->feathering_medium, 0.1, 50.0);
+  // Filter parameters
+  g->iterations = dt_bauhaus_slider_from_params(self, "iterations");
+  dt_bauhaus_slider_set_soft_max(g->iterations, 5);
   gtk_widget_set_tooltip_text
-    (g->feathering_medium,
-     _("edge sensitivity of the filter for medium details"));
-  dt_gui_box_add(g->feathering_section.container, g->feathering_medium);
+    (g->iterations,
+     _("number of filter passes\n"
+       "more iterations = smoother result but slower"));
 
-  g->feathering_detail = dt_bauhaus_slider_from_params(self, "feathering_detail");
-  dt_bauhaus_slider_set_soft_range(g->feathering_detail, 0.1, 50.0);
+  // Luminance estimator
+  g->method = dt_bauhaus_combobox_from_params(self, "method");
   gtk_widget_set_tooltip_text
-    (g->feathering_detail,
-     _("edge sensitivity of the filter for detail boost"));
-  dt_gui_box_add(g->feathering_section.container, g->feathering_detail);
+    (g->method,
+     _("method used to estimate pixel luminance from RGB values\n"
+       "choose the one that gives best contrast between details and surroundings"));
 
-  g->feathering_fine = dt_bauhaus_slider_from_params(self, "feathering_fine");
-  dt_bauhaus_slider_set_soft_range(g->feathering_fine, 0.1, 50.0);
+  // Detail preservation filter
+  g->details = dt_bauhaus_combobox_from_params(self, N_("details"));
   gtk_widget_set_tooltip_text
-    (g->feathering_fine,
-     _("edge sensitivity of the filter for fine details"));
-  dt_gui_box_add(g->feathering_section.container, g->feathering_fine);
-
-  g->feathering_micro = dt_bauhaus_slider_from_params(self, "feathering_micro");
-  dt_bauhaus_slider_set_soft_range(g->feathering_micro, 0.1, 50.0);
-  gtk_widget_set_tooltip_text
-    (g->feathering_micro,
-     _("edge sensitivity of the filter for micro details"));
-  dt_gui_box_add(g->feathering_section.container, g->feathering_micro);
-
+    (g->details,
+     _("edge-aware filter used to smooth the luminance mask\n"
+       "'guided filter' is good for general use\n"
+       "'EIGF' (exposure-independent guided filter) treats shadows and highlights equally\n"
+       "'averaged' variants blend with unfiltered for softer effect"));
 
   // Connect signals for pipe events
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_PREVIEW_PIPE_FINISHED, _develop_preview_pipe_finished_callback);

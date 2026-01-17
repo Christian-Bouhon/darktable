@@ -181,8 +181,6 @@ typedef struct dt_iop_local_contrast_rgb_gui_data_t
   // GTK widgets
   GtkWidget *broad_scale, *medium_scale, *detail_scale, *fine_scale, *micro_scale, *global_scale;
   GtkWidget *blending;
-  GtkWidget *method;
-  GtkWidget *details, *feathering, *iterations;
 } dt_iop_local_contrast_rgb_gui_data_t;
 
 
@@ -749,9 +747,9 @@ void commit_params(dt_iop_module_t *self,
   const dt_iop_local_contrast_rgb_params_t *p = (dt_iop_local_contrast_rgb_params_t *)p1;
   dt_iop_local_contrast_rgb_data_t *d = piece->data;
 
-  d->method = p->method;
-  d->details = p->details;
-  d->iterations = p->iterations;
+  d->method = DT_TONEEQ_NORM_2;
+  d->details = DT_LC_EIGF;
+  d->iterations = 1;
   d->broad_scale = p->broad_scale;
   d->medium_scale = p->medium_scale;
   d->detail_scale = p->detail_scale;
@@ -767,7 +765,7 @@ void commit_params(dt_iop_module_t *self,
 
   // UI guided filter feathering param increases edge taping
   // but actual regularization behaves inversely
-  d->feathering = 1.0f / p->feathering;
+  d->feathering = 1.0f / 5.0f;
 }
 
 
@@ -828,8 +826,6 @@ static void show_guiding_controls(const dt_iop_module_t *self)
 
   // All filters need these controls
   gtk_widget_set_visible(g->blending, TRUE);
-  gtk_widget_set_visible(g->feathering, TRUE);
-  gtk_widget_set_visible(g->iterations, TRUE);
 }
 
 
@@ -854,11 +850,7 @@ void gui_changed(dt_iop_module_t *self,
 {
   const dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
 
-  if(w == g->method
-     || w == g->blending
-     || w == g->feathering
-     || w == g->iterations
-     || w == g->details)
+  if(w == g->blending)
   {
     invalidate_luminance_cache(self);
   }
@@ -1048,38 +1040,6 @@ void gui_init(dt_iop_module_t *self)
      _("size of the smoothing area as percentage of image size\n"
        "larger = affects broader features\n"
        "smaller = affects finer details"));
-
-  g->feathering = dt_bauhaus_slider_from_params(self, "feathering");
-  dt_bauhaus_slider_set_soft_range(g->feathering, 0.1, 50.0);
-  gtk_widget_set_tooltip_text
-    (g->feathering,
-     _("edge sensitivity of the filter\n"
-       "higher = better edge preservation\n"
-       "lower = smoother transitions, but may lead to halos around edges"));
-
-  // Filter parameters
-  g->iterations = dt_bauhaus_slider_from_params(self, "iterations");
-  dt_bauhaus_slider_set_soft_max(g->iterations, 5);
-  gtk_widget_set_tooltip_text
-    (g->iterations,
-     _("number of filter passes\n"
-       "more iterations = smoother result but slower"));
-
-  // Luminance estimator
-  g->method = dt_bauhaus_combobox_from_params(self, "method");
-  gtk_widget_set_tooltip_text
-    (g->method,
-     _("method used to estimate pixel luminance from RGB values\n"
-       "choose the one that gives best contrast between details and surroundings"));
-
-  // Detail preservation filter
-  g->details = dt_bauhaus_combobox_from_params(self, N_("details"));
-  gtk_widget_set_tooltip_text
-    (g->details,
-     _("edge-aware filter used to smooth the luminance mask\n"
-       "'guided filter' is good for general use\n"
-       "'EIGF' (exposure-independent guided filter) treats shadows and highlights equally\n"
-       "'averaged' variants blend with unfiltered for softer effect"));
 
   // Connect signals for pipe events
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_PREVIEW_PIPE_FINISHED, _develop_preview_pipe_finished_callback);

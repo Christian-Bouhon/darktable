@@ -30,7 +30,7 @@
  *
  * The module should be placed early in the pipe (before color profile)
  * as it operates on scene-linear RGB data.
- *
+ * A Modifier
  ***/
 
 

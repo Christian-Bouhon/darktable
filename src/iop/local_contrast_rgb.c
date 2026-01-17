@@ -99,7 +99,7 @@ typedef struct dt_iop_local_contrast_rgb_params_t
 
   // Masking parameters
   // Blending is log-encoded because changes in small values are more noticeable
-  float blending;       // $MIN: 0.01 $MAX: 100.0 $DEFAULT: 12.0 $DESCRIPTION: "feature scale"
+  float blending;       // $MIN: 1.0 $MAX: 4.0 $DEFAULT: 1.2 $DESCRIPTION: "feature scale"
   float feathering;     // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "edges refinement/feathering"
 
   dt_iop_local_contrast_rgb_filter_t details; // $DEFAULT: DT_LC_EIGF $DESCRIPTION: "feature extractor"
@@ -121,6 +121,8 @@ typedef struct dt_iop_local_contrast_rgb_data_t
   int radius;
   int radius_broad;
   int radius_medium;
+  int radius_fine;
+  int radius_micro;
   int iterations;
   dt_iop_luminance_mask_method_t method;
   dt_iop_local_contrast_rgb_filter_t details;
@@ -600,8 +602,8 @@ static void local_contrast_process(dt_iop_module_t *self,
         compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
         compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
         compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro);
         hash_set_get(&hash, &g->ui_preview_hash, &self->gui_lock);
       }
     }
@@ -622,8 +624,8 @@ static void local_contrast_process(dt_iop_module_t *self,
         compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
         compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
         compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro);
         g->luminance_valid = TRUE;
         dt_iop_gui_leave_critical_section(self);
         dt_dev_pixelpipe_cache_invalidate_later(piece->pipe, self->iop_order);
@@ -645,8 +647,8 @@ static void local_contrast_process(dt_iop_module_t *self,
     compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
     compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
     compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
-    compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2);
-    compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4);
+    compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine);
+    compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro);
   }
 
   // Display output
@@ -714,6 +716,14 @@ void modify_roi_in(dt_iop_module_t *self,
   const float blending_medium = ((1.0f - d->blending) * 0.33f) + d->blending;
   const float diameter_medium = blending_medium * max_size * roi_in->scale;
   d->radius_medium = (int)((diameter_medium - 1.0f) / 2.0f);
+
+  const float blending_fine = ((d->blending - (d->blending * 0.15f)) * 0.5f) + (d->blending * 0.15f);
+  const float diameter_fine = blending_fine * max_size * roi_in->scale;
+  d->radius_fine = (int)((diameter_fine - 1.0f) / 2.0f);
+
+  const float blending_micro = d->blending * 0.15f;
+  const float diameter_micro = blending_micro * max_size * roi_in->scale;
+  d->radius_micro = (int)((diameter_micro - 1.0f) / 2.0f);
 }
 
 
@@ -753,7 +763,7 @@ void commit_params(dt_iop_module_t *self,
   // to make it more sensitive to small values that represent the most important value domain.
   // UI parameter is given in percentage of maximum blending value.
   // The actual blending parameter represents the fraction of the largest image dimension.
-  d->blending = p->blending * p->blending / 10000.0f;
+  d->blending = p->blending * p->blending / 100.0f;
 
   // UI guided filter feathering param increases edge taping
   // but actual regularization behaves inversely
@@ -1032,8 +1042,7 @@ void gui_init(dt_iop_module_t *self)
   dt_gui_box_add(self->widget, dt_ui_section_label_new(C_("section", "masking")));
 
   g->blending = dt_bauhaus_slider_from_params(self, "blending");
-  dt_bauhaus_slider_set_soft_range(g->blending, 0.1, 100.0);
-  dt_bauhaus_slider_set_format(g->blending, "%");
+  dt_bauhaus_slider_set_soft_range(g->blending, 1.0, 4.0);
   gtk_widget_set_tooltip_text
     (g->blending,
      _("size of the smoothing area as percentage of image size\n"

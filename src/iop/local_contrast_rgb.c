@@ -920,7 +920,7 @@ static void show_guiding_controls(const dt_iop_module_t *self)
 
 void gui_update(dt_iop_module_t *self)
 {
-  const dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
 
   show_guiding_controls(self);
   invalidate_luminance_cache(self);

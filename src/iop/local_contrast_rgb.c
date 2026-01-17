@@ -817,13 +817,13 @@ void modify_roi_in(dt_iop_module_t *self,
   const int radius = (int)((diameter - 1.0f) / 2.0f);
   d->radius = radius;
 
-  const float blending_extended = (1.0f - d->blending) * 0.33f;
-  const float diameter_extended = blending_extended * max_size * roi_in->scale;
-  d->radius_extended = (int)((diameter_extended - 1.0f) / 2.0f);
-
-  const float blending_broad = (1.0f - d->blending) * 0.66f;
+  const float blending_broad = ((1.0f - d->blending) * 0.66f) + d->blending;
   const float diameter_broad = blending_broad * max_size * roi_in->scale;
   d->radius_broad = (int)((diameter_broad - 1.0f) / 2.0f);
+
+  const float blending_extended = ((1.0f - d->blending) * 0.33f) + d->blending;
+  const float diameter_extended = blending_extended * max_size * roi_in->scale;
+  d->radius_extended = (int)((diameter_extended - 1.0f) / 2.0f);
 }
 
 

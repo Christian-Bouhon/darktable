@@ -103,8 +103,9 @@ const dt_iop_order_entry_t legacy_order[] = {
   { {20.0f }, "flip", 0},
   { {20.5f }, "enlargecanvas", 0},
   { {21.0f }, "clipping", 0},
-  { {21.5f }, "toneequal", 0},
-  { {21.6f }, "local_contrast_rgb", 0},
+  { {21.4f }, "toneequal", 0},
+  { {21.5f }, "local_contrast_rgb", 0},
+  { {21.5f }, "pyramidal_contrast",0},
   { {21.7f }, "crop", 0},
   { {21.9f }, "overlay", 0},
   { {22.0f }, "graduatednd", 0},
@@ -211,6 +212,7 @@ const dt_iop_order_entry_t v30_order[] = {
   { {24.0f }, "toneequal", 0},       // last module that need enlarged
   // roi_in
   { {24.3f }, "local_contrast_rgb", 0},
+  { {24.4f }, "pyramidal_contrast",0},
   { {24.5f }, "crop", 0},            // should go after all modules
                                      // that may need a wider roi_in
   { {25.0f }, "graduatednd", 0},
@@ -330,6 +332,7 @@ const dt_iop_order_entry_t v50_order[] = {
   { {24.0f }, "toneequal", 0},       // last module that need enlarged
   // roi_in
   { {24.3f }, "local_contrast_rgb", 0},
+  { {24.4f }, "pyramidal_contrast",0},
   { {24.5f }, "crop", 0},            // should go after all modules
                                      // that may need a wider roi_in
   { {25.0f }, "graduatednd", 0},
@@ -449,6 +452,7 @@ const dt_iop_order_entry_t v30_jpg_order[] = {
   { { 28.0f }, "mask_manager", 0},
   { { 28.0f }, "tonemap", 0},
   { { 28.0f }, "local_contrast_rgb", 0},
+  { { 28.0f }, "pyramidal_contrast",0},
   { { 28.0f }, "toneequal", 0},       // last module that need enlarged roi_in
   { { 28.0f }, "crop", 0},            // should go after all modules
                                       // that may need a wider roi_in
@@ -571,6 +575,7 @@ const dt_iop_order_entry_t v50_jpg_order[] = {
   { { 28.0f }, "mask_manager", 0},
   { { 28.0f }, "tonemap", 0},
   { { 28.0f }, "local_contrast_rgb", 0},
+  { { 28.0f }, "pyramidal_contrast",0},
   { { 28.0f }, "toneequal", 0},       // last module that need enlarged roi_in
   { { 28.0f }, "crop", 0},            // should go after all modules
                                       // that may need a wider roi_in
@@ -1190,7 +1195,8 @@ GList *dt_ioppr_get_iop_order_list(const dt_imgid_t imgid,
           _insert_before(iop_order_list, "filmicrgb", "agx");
           _insert_before(iop_order_list, "colorbalancergb", "colorequal");
           _insert_before(iop_order_list, "highlights", "rasterfile");
-          _insert_before(iop_order_list, "local_contrast_rgb", "crop");
+          _insert_before(iop_order_list, "pyramidal_contrast", "local_contrast_rgb");
+          _insert_before(iop_order_list, "pyramidal_contrast", "crop");
           _insert_before(iop_order_list, "toneequal", "local_contrast_rgb");
         }
       }

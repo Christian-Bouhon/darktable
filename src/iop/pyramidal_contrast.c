@@ -67,7 +67,7 @@
 #endif
 
 
-DT_MODULE_INTROSPECTION(1, dt_iop_local_contrast_rgb_params_t)
+DT_MODULE_INTROSPECTION(1, dt_iop_pyramidal_contrast_params_t)
 
 
 #define MIN_FLOAT exp2f(-16.0f)
@@ -77,16 +77,16 @@ DT_MODULE_INTROSPECTION(1, dt_iop_local_contrast_rgb_params_t)
  * DT_TONEEQ_NONE is intentionally omitted as it produces no blur,
  * which would result in no local contrast extraction.
  **/
-typedef enum dt_iop_local_contrast_rgb_filter_t
+typedef enum dt_iop_pyramidal_contrast_filter_t
 {
   DT_LC_AVG_GUIDED = 0, // $DESCRIPTION: "averaged guided filter"
   DT_LC_GUIDED,         // $DESCRIPTION: "guided filter"
   DT_LC_AVG_EIGF,       // $DESCRIPTION: "averaged EIGF"
   DT_LC_EIGF            // $DESCRIPTION: "EIGF"
-} dt_iop_local_contrast_rgb_filter_t;
+} dt_iop_pyramidal_contrast_filter_t;
 
 
-typedef struct dt_iop_local_contrast_rgb_params_t
+typedef struct dt_iop_pyramidal_contrast_params_t
 {
   // Local contrast scaling factor
   float micro_scale;    // $MIN: 0.0 $MAX: 5.0 $DEFAULT: 1.0 $DESCRIPTION: "micro contrast"
@@ -101,13 +101,13 @@ typedef struct dt_iop_local_contrast_rgb_params_t
   float blending;       // $MIN: 1.0 $MAX: 4.0 $DEFAULT: 1.2 $DESCRIPTION: "feature scale"
   float feathering;     // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "edges refinement/feathering"
 
-  dt_iop_local_contrast_rgb_filter_t details; // $DEFAULT: DT_LC_EIGF $DESCRIPTION: "feature extractor"
+  dt_iop_pyramidal_contrast_filter_t details; // $DEFAULT: DT_LC_EIGF $DESCRIPTION: "feature extractor"
   dt_iop_luminance_mask_method_t method;      // $DEFAULT: DT_TONEEQ_NORM_2 $DESCRIPTION: "luminance estimator"
   int iterations;       // $MIN: 1 $MAX: 20 $DEFAULT: 1 $DESCRIPTION: "filter diffusion"
-} dt_iop_local_contrast_rgb_params_t;
+} dt_iop_pyramidal_contrast_params_t;
 
 
-typedef struct dt_iop_local_contrast_rgb_data_t
+typedef struct dt_iop_pyramidal_contrast_data_t
 {
   float broad_scale;
   float medium_scale;
@@ -124,17 +124,17 @@ typedef struct dt_iop_local_contrast_rgb_data_t
   int radius_micro;
   int iterations;
   dt_iop_luminance_mask_method_t method;
-  dt_iop_local_contrast_rgb_filter_t details;
-} dt_iop_local_contrast_rgb_data_t;
+  dt_iop_pyramidal_contrast_filter_t details;
+} dt_iop_pyramidal_contrast_data_t;
 
 
-typedef struct dt_iop_local_contrast_rgb_global_data_t
+typedef struct dt_iop_pyramidal_contrast_global_data_t
 {
   // Reserved for OpenCL kernels
-} dt_iop_local_contrast_rgb_global_data_t;
+} dt_iop_pyramidal_contrast_global_data_t;
 
 
-typedef enum dt_iop_local_contrast_mask_t
+typedef enum dt_iop_pyramidal_contrast_mask_t
 {
   DT_LC_MASK_OFF = 0,
   DT_LC_MASK_BROAD = 1,
@@ -142,12 +142,12 @@ typedef enum dt_iop_local_contrast_mask_t
   DT_LC_MASK_DETAIL = 3,
   DT_LC_MASK_FINE = 4,
   DT_LC_MASK_MICRO = 5
-} dt_iop_local_contrast_mask_t;
+} dt_iop_pyramidal_contrast_mask_t;
 
-typedef struct dt_iop_local_contrast_rgb_gui_data_t
+typedef struct dt_iop_pyramidal_contrast_gui_data_t
 {
   // Flags
-  dt_iop_local_contrast_mask_t mask_display;
+  dt_iop_pyramidal_contrast_mask_t mask_display;
 
   // Buffer dimensions
   int buf_width;
@@ -180,7 +180,7 @@ typedef struct dt_iop_local_contrast_rgb_gui_data_t
   // GTK widgets
   GtkWidget *broad_scale, *medium_scale, *detail_scale, *fine_scale, *micro_scale, *global_scale;
   GtkWidget *blending;
-} dt_iop_local_contrast_rgb_gui_data_t;
+} dt_iop_pyramidal_contrast_gui_data_t;
 
 
 const char *name()
@@ -236,7 +236,7 @@ static void hash_set_get(const dt_hash_t *hash_in,
 
 static void invalidate_luminance_cache(dt_iop_module_t *const self)
 {
-  dt_iop_local_contrast_rgb_gui_data_t *const restrict g = self->gui_data;
+  dt_iop_pyramidal_contrast_gui_data_t *const restrict g = self->gui_data;
 
   dt_iop_gui_enter_critical_section(self);
   g->luminance_valid = FALSE;
@@ -270,7 +270,7 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
                                                    float *const restrict luminance,
                                                    const size_t width,
                                                    const size_t height,
-                                                const dt_iop_local_contrast_rgb_data_t *const d,
+                                                const dt_iop_pyramidal_contrast_data_t *const d,
                                                 const int radius)
 {
   // First compute pixel-wise luminance (no boost)
@@ -333,7 +333,7 @@ static inline void apply_local_contrast(const float *const restrict in,
                                         float *const restrict out,
                                         const dt_iop_roi_t *const roi_in,
                                         const dt_iop_roi_t *const roi_out,
-                                        const dt_iop_local_contrast_rgb_data_t *const d)
+                                        const dt_iop_pyramidal_contrast_data_t *const d)
 {
   const size_t npixels = (size_t)roi_in->width * roi_in->height;
 
@@ -437,15 +437,15 @@ static inline void display_detail_mask(const float *const restrict luminance_pix
  * Main processing function
  **/
 __DT_CLONE_TARGETS__
-static void local_contrast_process(dt_iop_module_t *self,
+static void pyramidal_contrast_process(dt_iop_module_t *self,
                                    dt_dev_pixelpipe_iop_t *piece,
                                    const void *const restrict ivoid,
                                    void *const restrict ovoid,
                                    const dt_iop_roi_t *const roi_in,
                                    const dt_iop_roi_t *const roi_out)
 {
-  const dt_iop_local_contrast_rgb_data_t *const d = piece->data;
-  dt_iop_local_contrast_rgb_gui_data_t *const g = self->gui_data;
+  const dt_iop_pyramidal_contrast_data_t *const d = piece->data;
+  dt_iop_pyramidal_contrast_gui_data_t *const g = self->gui_data;
 
   const float *const restrict in = (float *const)ivoid;
   float *const restrict out = (float *const)ovoid;
@@ -689,7 +689,7 @@ void process(dt_iop_module_t *self,
              const dt_iop_roi_t *const roi_in,
              const dt_iop_roi_t *const roi_out)
 {
-  local_contrast_process(self, piece, ivoid, ovoid, roi_in, roi_out);
+  pyramidal_contrast_process(self, piece, ivoid, ovoid, roi_in, roi_out);
 }
 
 
@@ -698,7 +698,7 @@ void modify_roi_in(dt_iop_module_t *self,
                    const dt_iop_roi_t *roi_out,
                    dt_iop_roi_t *roi_in)
 {
-  dt_iop_local_contrast_rgb_data_t *const d = piece->data;
+  dt_iop_pyramidal_contrast_data_t *const d = piece->data;
 
   // Get the scaled window radius for the box average
   const int max_size = (piece->iwidth > piece->iheight) ? piece->iwidth : piece->iheight;
@@ -726,7 +726,7 @@ void modify_roi_in(dt_iop_module_t *self,
 
 void init_global(dt_iop_module_so_t *self)
 {
-  dt_iop_local_contrast_rgb_global_data_t *gd = malloc(sizeof(dt_iop_local_contrast_rgb_global_data_t));
+  dt_iop_pyramidal_contrast_global_data_t *gd = malloc(sizeof(dt_iop_pyramidal_contrast_global_data_t));
   self->data = gd;
 }
 
@@ -743,8 +743,8 @@ void commit_params(dt_iop_module_t *self,
                    dt_dev_pixelpipe_t *pipe,
                    dt_dev_pixelpipe_iop_t *piece)
 {
-  const dt_iop_local_contrast_rgb_params_t *p = (dt_iop_local_contrast_rgb_params_t *)p1;
-  dt_iop_local_contrast_rgb_data_t *d = piece->data;
+  const dt_iop_pyramidal_contrast_params_t *p = (dt_iop_pyramidal_contrast_params_t *)p1;
+  dt_iop_pyramidal_contrast_data_t *d = piece->data;
 
   d->method = DT_TONEEQ_NORM_2;
   d->details = DT_LC_EIGF;
@@ -772,7 +772,7 @@ void init_pipe(dt_iop_module_t *self,
                dt_dev_pixelpipe_t *pipe,
                dt_dev_pixelpipe_iop_t *piece)
 {
-  piece->data = dt_calloc1_align_type(dt_iop_local_contrast_rgb_data_t);
+  piece->data = dt_calloc1_align_type(dt_iop_pyramidal_contrast_data_t);
 }
 
 
@@ -787,7 +787,7 @@ void cleanup_pipe(dt_iop_module_t *self,
 
 static void gui_cache_init(dt_iop_module_t *self)
 {
-  dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
   if(g == NULL) return;
 
   dt_iop_gui_enter_critical_section(self);
@@ -821,7 +821,7 @@ static void gui_cache_init(dt_iop_module_t *self)
 
 static void show_guiding_controls(const dt_iop_module_t *self)
 {
-  const dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  const dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
 
   // All filters need these controls
   gtk_widget_set_visible(g->blending, TRUE);
@@ -830,7 +830,7 @@ static void show_guiding_controls(const dt_iop_module_t *self)
 
 void gui_update(dt_iop_module_t *self)
 {
-  const dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  const dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
 
   show_guiding_controls(self);
   invalidate_luminance_cache(self);
@@ -847,7 +847,7 @@ void gui_changed(dt_iop_module_t *self,
                  GtkWidget *w,
                  void *previous)
 {
-  const dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  const dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
 
   if(w == g->blending)
   {
@@ -859,7 +859,7 @@ void gui_changed(dt_iop_module_t *self,
 static void _quad_callback(GtkWidget *quad, dt_iop_module_t *self)
 {
   if(darktable.gui->reset) return;
-  dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
 
   // If blend module is displaying mask, don't display here
   if(self->request_mask_display)
@@ -899,7 +899,7 @@ static void _quad_callback(GtkWidget *quad, dt_iop_module_t *self)
 static void _develop_ui_pipe_started_callback(gpointer instance,
                                               dt_iop_module_t *self)
 {
-  dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
   if(g == NULL) return;
 
   if(!self->expanded || !self->enabled)
@@ -924,7 +924,7 @@ static void _develop_ui_pipe_started_callback(gpointer instance,
 static void _develop_preview_pipe_finished_callback(gpointer instance,
                                                     dt_iop_module_t *self)
 {
-  const dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  const dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
   if(g == NULL) return;
 }
 
@@ -932,14 +932,14 @@ static void _develop_preview_pipe_finished_callback(gpointer instance,
 static void _develop_ui_pipe_finished_callback(gpointer instance,
                                                dt_iop_module_t *self)
 {
-  const dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  const dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
   if(g == NULL) return;
 }
 
 
 void gui_focus(dt_iop_module_t *self, gboolean in)
 {
-  dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
   if(!in)
   {
     const gboolean mask_was_shown = (g->mask_display != DT_LC_MASK_OFF);
@@ -964,7 +964,7 @@ void gui_reset(dt_iop_module_t *self)
 
 void gui_init(dt_iop_module_t *self)
 {
-  dt_iop_local_contrast_rgb_gui_data_t *g = IOP_GUI_ALLOC(local_contrast_rgb);
+  dt_iop_pyramidal_contrast_gui_data_t *g = IOP_GUI_ALLOC(pyramidal_contrast);
 
   gui_cache_init(self);
 
@@ -1052,7 +1052,7 @@ void gui_init(dt_iop_module_t *self)
 
 void gui_cleanup(dt_iop_module_t *self)
 {
-  dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
+  dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
 
   dt_free_align(g->thumb_preview_buf_pixel);
   dt_free_align(g->thumb_preview_buf_smoothed_broad);

@@ -316,7 +316,7 @@ int legacy_params(dt_iop_module_t *self,
     dt_iop_local_contrast_rgb_params_t *n = malloc(sizeof(dt_iop_local_contrast_rgb_params_t));
 
     n->broad_scale = 1.0f;
-    n->medium_scale = o->extended_scale;
+    n->medium_scale = 1.0f;
     n->detail_scale = o->detail_scale;
     n->fine_scale = o->fine_scale;
     n->micro_scale = o->micro_scale;

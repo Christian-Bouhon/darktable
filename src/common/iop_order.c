@@ -105,7 +105,7 @@ const dt_iop_order_entry_t legacy_order[] = {
   { {21.0f }, "clipping", 0},
   { {21.4f }, "toneequal", 0},
   { {21.5f }, "local_contrast_rgb", 0},
-  { {21.5f }, "pyramidal_contrast",0},
+  { {21.6f }, "pyramidal_contrast",0},
   { {21.7f }, "crop", 0},
   { {21.9f }, "overlay", 0},
   { {22.0f }, "graduatednd", 0},

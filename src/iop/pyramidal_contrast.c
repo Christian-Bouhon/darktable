@@ -180,6 +180,7 @@ typedef struct dt_iop_pyramidal_contrast_gui_data_t
   // GTK widgets
   GtkWidget *broad_scale, *medium_scale, *detail_scale, *fine_scale, *micro_scale, *global_scale;
   GtkWidget *blending;
+  GtkWidget *feathering;
 } dt_iop_pyramidal_contrast_gui_data_t;
 
 
@@ -706,19 +707,19 @@ void modify_roi_in(dt_iop_module_t *self,
   const int radius = (int)((diameter - 1.0f) / 2.0f);
   d->radius = radius;
 
-  const float blending_broad = ((1.0f - d->blending) * 0.66f) + d->blending;
+  const float blending_broad = ((1.0f - d->blending) * 0.625f) + d->blending;
   const float diameter_broad = blending_broad * max_size * roi_in->scale;
   d->radius_broad = (int)((diameter_broad - 1.0f) / 2.0f);
 
-  const float blending_medium = ((1.0f - d->blending) * 0.33f) + d->blending;
+  const float blending_medium = ((1.0f - d->blending) * 0.25f) + d->blending;
   const float diameter_medium = blending_medium * max_size * roi_in->scale;
   d->radius_medium = (int)((diameter_medium - 1.0f) / 2.0f);
 
-  const float blending_fine = ((d->blending - (d->blending * 0.15f)) * 0.5f) + (d->blending * 0.15f);
+  const float blending_fine = ((d->blending - (d->blending * 0.25f)) * 0.5f) + (d->blending * 0.25f);
   const float diameter_fine = blending_fine * max_size * roi_in->scale;
   d->radius_fine = (int)((diameter_fine - 1.0f) / 2.0f);
 
-  const float blending_micro = d->blending * 0.15f;
+  const float blending_micro = d->blending * 0.25f;
   const float diameter_micro = blending_micro * max_size * roi_in->scale;
   d->radius_micro = (int)((diameter_micro - 1.0f) / 2.0f);
 }
@@ -764,7 +765,7 @@ void commit_params(dt_iop_module_t *self,
 
   // UI guided filter feathering param increases edge taping
   // but actual regularization behaves inversely
-  d->feathering = 1.0f / 5.0f;
+  d->feathering = 1.0f / p->feathering;
 }
 
 
@@ -825,6 +826,7 @@ static void show_guiding_controls(const dt_iop_module_t *self)
 
   // All filters need these controls
   gtk_widget_set_visible(g->blending, TRUE);
+  gtk_widget_set_visible(g->feathering, TRUE);
 }
 
 
@@ -849,7 +851,7 @@ void gui_changed(dt_iop_module_t *self,
 {
   const dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
 
-  if(w == g->blending)
+  if(w == g->blending || w == g->feathering)
   {
     invalidate_luminance_cache(self);
   }
@@ -1042,6 +1044,11 @@ void gui_init(dt_iop_module_t *self)
        "larger = affects broader features\n"
        "smaller = affects finer details"));
   dt_gui_box_add(self->widget, g->blending);
+
+  g->feathering = dt_bauhaus_slider_from_params(self, "feathering");
+  dt_bauhaus_slider_set_soft_range(g->feathering, 0.1, 50.0);
+  gtk_widget_set_tooltip_text(g->feathering, _("edges refinement"));
+  dt_gui_box_add(self->widget, g->feathering);
 
   // Connect signals for pipe events
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_PREVIEW_PIPE_FINISHED, _develop_preview_pipe_finished_callback);

@@ -272,7 +272,8 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
                                                    const size_t width,
                                                    const size_t height,
                                                 const dt_iop_pyramidal_contrast_data_t *const d,
-                                                const int radius)
+                                                const int radius,
+                                                const float feathering)
 {
   // First compute pixel-wise luminance (no boost)
   luminance_mask(in, luminance, width, height, d->method, 1.0f, 0.0f, 1.0f);
@@ -282,7 +283,7 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
   {
     case(DT_LC_AVG_GUIDED):
     {
-      fast_surface_blur(luminance, width, height, radius, d->feathering, d->iterations,
+      fast_surface_blur(luminance, width, height, radius, feathering, d->iterations,
                         DT_GF_BLENDING_GEOMEAN, d->scale, 0.0f,
                         exp2f(-14.0f), 4.0f);
       break;
@@ -290,7 +291,7 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
 
     case(DT_LC_GUIDED):
     {
-      fast_surface_blur(luminance, width, height, radius, d->feathering, d->iterations,
+      fast_surface_blur(luminance, width, height, radius, feathering, d->iterations,
                         DT_GF_BLENDING_LINEAR, d->scale, 0.0f,
                         exp2f(-14.0f), 4.0f);
       break;
@@ -299,7 +300,7 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
     case(DT_LC_AVG_EIGF):
     {
       fast_eigf_surface_blur(luminance, width, height,
-                             radius, d->feathering, d->iterations,
+                             radius, feathering, d->iterations,
                              DT_GF_BLENDING_GEOMEAN, d->scale,
                              0.0f, exp2f(-14.0f), 4.0f);
       break;
@@ -308,7 +309,7 @@ static inline void compute_smoothed_luminance_mask(const float *const restrict i
     case(DT_LC_EIGF):
     {
       fast_eigf_surface_blur(luminance, width, height,
-                             radius, d->feathering, d->iterations,
+                             radius, feathering, d->iterations,
                              DT_GF_BLENDING_LINEAR, d->scale,
                              0.0f, exp2f(-14.0f), 4.0f);
       break;
@@ -597,11 +598,11 @@ static void pyramidal_contrast_process(dt_iop_module_t *self,
       if(hash != saved_hash || !luminance_valid)
       {
         compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
-        compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * 1.5f);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * 1.25f);
+        compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering * 0.75f);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering * 0.5f);
         hash_set_get(&hash, &g->ui_preview_hash, &self->gui_lock);
       }
     }
@@ -619,11 +620,11 @@ static void pyramidal_contrast_process(dt_iop_module_t *self,
         dt_iop_gui_enter_critical_section(self);
         g->thumb_preview_hash = hash;
         compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
-        compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * 1.5f);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * 1.25f);
+        compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering * 0.75f);
+        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering * 0.5f);
         g->luminance_valid = TRUE;
         dt_iop_gui_leave_critical_section(self);
         dt_dev_pixelpipe_cache_invalidate_later(piece->pipe, self->iop_order);
@@ -632,21 +633,21 @@ static void pyramidal_contrast_process(dt_iop_module_t *self,
     else
     {
       compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-      compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
-      compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
-      compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
-      compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2);
-      compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4);
+      compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * 1.5f);
+      compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * 1.25f);
+      compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering);
+      compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2, d->feathering * 0.75f);
+      compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4, d->feathering * 0.5f);
     }
   }
   else
   {
     compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-    compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad);
-    compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium);
-    compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius);
-    compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine);
-    compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro);
+    compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * 1.5f);
+    compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * 1.25f);
+    compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering);
+    compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering * 0.75f);
+    compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering * 0.5f);
   }
 
   // Display output
@@ -707,7 +708,7 @@ void modify_roi_in(dt_iop_module_t *self,
   const int radius = (int)((diameter - 1.0f) / 2.0f);
   d->radius = radius;
 
-  const float blending_broad = ((1.0f - d->blending) * 0.625f) + d->blending;
+  const float blending_broad = ((1.0f - d->blending) * 0.5f) + d->blending;
   const float diameter_broad = blending_broad * max_size * roi_in->scale;
   d->radius_broad = (int)((diameter_broad - 1.0f) / 2.0f);
 

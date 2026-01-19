@@ -1195,9 +1195,8 @@ GList *dt_ioppr_get_iop_order_list(const dt_imgid_t imgid,
           _insert_before(iop_order_list, "filmicrgb", "agx");
           _insert_before(iop_order_list, "colorbalancergb", "colorequal");
           _insert_before(iop_order_list, "highlights", "rasterfile");
+          _insert_before(iop_order_list, "crop", "pyramidal_contrast");
           _insert_before(iop_order_list, "pyramidal_contrast", "local_contrast_rgb");
-          _insert_before(iop_order_list, "pyramidal_contrast", "crop");
-          _insert_before(iop_order_list, "toneequal", "local_contrast_rgb");
         }
       }
       else if(version >= DT_IOP_ORDER_LEGACY

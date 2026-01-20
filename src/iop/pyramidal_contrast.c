@@ -68,7 +68,7 @@
 #endif
 
 
-DT_MODULE_INTROSPECTION(2, dt_iop_pyramidal_contrast_params_t)
+DT_MODULE_INTROSPECTION(3, dt_iop_pyramidal_contrast_params_t)
 
 
 #define MIN_FLOAT exp2f(-16.0f)
@@ -108,6 +108,12 @@ typedef struct dt_iop_pyramidal_contrast_params_t
   float f_mult_medium; // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 1.25 $DESCRIPTION: "broad contrast feathering"
   float f_mult_broad;  // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 1.50 $DESCRIPTION: "extended contrast feathering"
 
+  float s_mult_micro;  // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 0.25 $DESCRIPTION: "micro contrast scale multiplier"
+  float s_mult_fine;   // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 0.625 $DESCRIPTION: "fine contrast scale multiplier"
+  float s_mult_detail; // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 1.0 $DESCRIPTION: "local contrast scale multiplier"
+  float s_mult_medium; // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 1.8 $DESCRIPTION: "broad contrast scale multiplier"
+  float s_mult_broad;  // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 2.8 $DESCRIPTION: "extended contrast scale multiplier"
+
   dt_iop_pyramidal_contrast_filter_t details; // $DEFAULT: DT_LC_EIGF $DESCRIPTION: "feature extractor"
   dt_iop_luminance_mask_method_t method;      // $DEFAULT: DT_TONEEQ_NORM_2 $DESCRIPTION: "luminance estimator"
   int iterations;       // $MIN: 1 $MAX: 20 $DEFAULT: 1 $DESCRIPTION: "filter diffusion"
@@ -124,6 +130,7 @@ typedef struct dt_iop_pyramidal_contrast_data_t
   float global_scale;
   float blending, feathering;
   float f_mult_micro, f_mult_fine, f_mult_detail, f_mult_medium, f_mult_broad;
+  float s_mult_micro, s_mult_fine, s_mult_detail, s_mult_medium, s_mult_broad;
   float scale;
   int radius;
   int radius_broad;
@@ -191,6 +198,8 @@ typedef struct dt_iop_pyramidal_contrast_gui_data_t
   GtkWidget *feathering;
   dt_gui_collapsible_section_t advanced_expander;
   GtkWidget *f_mult_micro, *f_mult_fine, *f_mult_detail, *f_mult_medium, *f_mult_broad;
+  dt_gui_collapsible_section_t scale_expander;
+  GtkWidget *s_mult_micro, *s_mult_fine, *s_mult_detail, *s_mult_medium, *s_mult_broad;
 } dt_iop_pyramidal_contrast_gui_data_t;
 
 
@@ -275,6 +284,12 @@ int legacy_params(dt_iop_module_t *self,
     n->f_mult_medium = 1.25f;
     n->f_mult_broad = 1.5f;
 
+    n->s_mult_micro = 0.25f;
+    n->s_mult_fine = 0.625f;
+    n->s_mult_detail = 1.0f;
+    n->s_mult_medium = 1.8f;
+    n->s_mult_broad = 2.8f;
+
     // Copie de la fin de la structure v1
     n->details = o->details;
     n->method = o->method;
@@ -282,7 +297,7 @@ int legacy_params(dt_iop_module_t *self,
 
     *new_params = n;
     *new_params_size = sizeof(dt_iop_pyramidal_contrast_params_t);
-    *new_version = 2;
+    *new_version = 3;
     return 0;
   }
   return 1;
@@ -777,25 +792,22 @@ void modify_roi_in(dt_iop_module_t *self,
   dt_iop_pyramidal_contrast_data_t *const d = piece->data;
 
   // Get the scaled window radius for the box average
-  const int max_size = (piece->iwidth > piece->iheight) ? piece->iwidth : piece->iheight;
-  const float diameter = d->blending * max_size * roi_in->scale;
-  const int radius = (int)((diameter - 1.0f) / 2.0f);
-  d->radius = radius;
+  const float max_size = (float)((piece->iwidth > piece->iheight) ? piece->iwidth : piece->iheight);
+  const float base_diameter = d->blending * max_size * roi_in->scale;
 
-  const float blending_broad = ((1.0f - d->blending) * 0.25f) + d->blending;
-  const float diameter_broad = blending_broad * max_size * roi_in->scale;
+  const float diameter_broad = base_diameter * d->s_mult_broad;
   d->radius_broad = (int)((diameter_broad - 1.0f) / 2.0f);
 
-  const float blending_medium = ((1.0f - d->blending) * 0.125f) + d->blending;
-  const float diameter_medium = blending_medium * max_size * roi_in->scale;
+  const float diameter_medium = base_diameter * d->s_mult_medium;
   d->radius_medium = (int)((diameter_medium - 1.0f) / 2.0f);
 
-  const float blending_fine = ((d->blending - (d->blending * 0.25f)) * 0.5f) + (d->blending * 0.25f);
-  const float diameter_fine = blending_fine * max_size * roi_in->scale;
+  const float diameter_detail = base_diameter * d->s_mult_detail;
+  d->radius = (int)((diameter_detail - 1.0f) / 2.0f);
+
+  const float diameter_fine = base_diameter * d->s_mult_fine;
   d->radius_fine = (int)((diameter_fine - 1.0f) / 2.0f);
 
-  const float blending_micro = d->blending * 0.25f;
-  const float diameter_micro = blending_micro * max_size * roi_in->scale;
+  const float diameter_micro = base_diameter * d->s_mult_micro;
   d->radius_micro = (int)((diameter_micro - 1.0f) / 2.0f);
 }
 
@@ -847,6 +859,12 @@ void commit_params(dt_iop_module_t *self,
   d->f_mult_detail = p->f_mult_detail;
   d->f_mult_medium = p->f_mult_medium;
   d->f_mult_broad = p->f_mult_broad;
+
+  d->s_mult_micro = p->s_mult_micro;
+  d->s_mult_fine = p->s_mult_fine;
+  d->s_mult_detail = p->s_mult_detail;
+  d->s_mult_medium = p->s_mult_medium;
+  d->s_mult_broad = p->s_mult_broad;
 }
 
 
@@ -936,7 +954,9 @@ void gui_changed(dt_iop_module_t *self,
 
   if(w == g->blending || w == g->feathering
      || w == g->f_mult_micro || w == g->f_mult_fine || w == g->f_mult_detail
-     || w == g->f_mult_medium || w == g->f_mult_broad)
+     || w == g->f_mult_medium || w == g->f_mult_broad
+     || w == g->s_mult_micro || w == g->s_mult_fine || w == g->s_mult_detail
+     || w == g->s_mult_medium || w == g->s_mult_broad)
   {
     invalidate_luminance_cache(self);
   }
@@ -1157,6 +1177,36 @@ void gui_init(dt_iop_module_t *self)
   g->f_mult_broad = dt_bauhaus_slider_from_params(self, "f_mult_broad");
   dt_bauhaus_slider_set_digits(g->f_mult_broad, 2);
   dt_bauhaus_slider_set_soft_range(g->f_mult_broad, 0.1, 3.0);
+
+  // Restore main widget
+  self->widget = main_box;
+
+  // Create section for scale multipliers
+  dt_gui_new_collapsible_section(&g->scale_expander, "plugins/darkroom/pyramidal_contrast/expanded_scale",
+                                 _("scale multipliers"), GTK_BOX(main_box), DT_ACTION(self));
+  
+  // Switch self->widget to the section container
+  self->widget = GTK_WIDGET(g->scale_expander.container);
+
+  g->s_mult_micro = dt_bauhaus_slider_from_params(self, "s_mult_micro");
+  dt_bauhaus_slider_set_digits(g->s_mult_micro, 2);
+  dt_bauhaus_slider_set_soft_range(g->s_mult_micro, 0.1, 3.0);
+
+  g->s_mult_fine = dt_bauhaus_slider_from_params(self, "s_mult_fine");
+  dt_bauhaus_slider_set_digits(g->s_mult_fine, 2);
+  dt_bauhaus_slider_set_soft_range(g->s_mult_fine, 0.1, 3.0);
+
+  g->s_mult_detail = dt_bauhaus_slider_from_params(self, "s_mult_detail");
+  dt_bauhaus_slider_set_digits(g->s_mult_detail, 2);
+  dt_bauhaus_slider_set_soft_range(g->s_mult_detail, 0.1, 3.0);
+
+  g->s_mult_medium = dt_bauhaus_slider_from_params(self, "s_mult_medium");
+  dt_bauhaus_slider_set_digits(g->s_mult_medium, 2);
+  dt_bauhaus_slider_set_soft_range(g->s_mult_medium, 0.1, 3.0);
+
+  g->s_mult_broad = dt_bauhaus_slider_from_params(self, "s_mult_broad");
+  dt_bauhaus_slider_set_digits(g->s_mult_broad, 2);
+  dt_bauhaus_slider_set_soft_range(g->s_mult_broad, 0.1, 3.0);
 
   // Restore main widget
   self->widget = main_box;

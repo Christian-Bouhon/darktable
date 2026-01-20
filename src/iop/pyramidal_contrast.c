@@ -57,6 +57,7 @@
 #include "develop/imageop_gui.h"
 #include "gui/accelerators.h"
 #include "gui/draw.h"
+#include "dtgtk/expander.h"
 #include "gui/gtk.h"
 #include "gui/presets.h"
 #include "iop/iop_api.h"
@@ -67,7 +68,7 @@
 #endif
 
 
-DT_MODULE_INTROSPECTION(1, dt_iop_pyramidal_contrast_params_t)
+DT_MODULE_INTROSPECTION(2, dt_iop_pyramidal_contrast_params_t)
 
 
 #define MIN_FLOAT exp2f(-16.0f)
@@ -101,6 +102,12 @@ typedef struct dt_iop_pyramidal_contrast_params_t
   float blending;       // $MIN: 1.0 $MAX: 4.0 $DEFAULT: 1.2 $DESCRIPTION: "feature scale"
   float feathering;     // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "edges refinement/feathering"
 
+  float f_mult_micro;  // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 0.5 $DESCRIPTION: "micro contrast feathering"
+  float f_mult_fine;   // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 0.75 $DESCRIPTION: "fine contrast feathering"
+  float f_mult_detail; // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 1.0 $DESCRIPTION: "local contrast feathering"
+  float f_mult_medium; // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 1.25 $DESCRIPTION: "broad contrast feathering"
+  float f_mult_broad;  // $MIN: 0.1 $MAX: 5.0 $DEFAULT: 1.50 $DESCRIPTION: "extended contrast feathering"
+
   dt_iop_pyramidal_contrast_filter_t details; // $DEFAULT: DT_LC_EIGF $DESCRIPTION: "feature extractor"
   dt_iop_luminance_mask_method_t method;      // $DEFAULT: DT_TONEEQ_NORM_2 $DESCRIPTION: "luminance estimator"
   int iterations;       // $MIN: 1 $MAX: 20 $DEFAULT: 1 $DESCRIPTION: "filter diffusion"
@@ -116,6 +123,7 @@ typedef struct dt_iop_pyramidal_contrast_data_t
   float micro_scale;
   float global_scale;
   float blending, feathering;
+  float f_mult_micro, f_mult_fine, f_mult_detail, f_mult_medium, f_mult_broad;
   float scale;
   int radius;
   int radius_broad;
@@ -181,6 +189,8 @@ typedef struct dt_iop_pyramidal_contrast_gui_data_t
   GtkWidget *broad_scale, *medium_scale, *detail_scale, *fine_scale, *micro_scale, *global_scale;
   GtkWidget *blending;
   GtkWidget *feathering;
+  dt_gui_collapsible_section_t advanced_expander;
+  GtkWidget *f_mult_micro, *f_mult_fine, *f_mult_detail, *f_mult_medium, *f_mult_broad;
 } dt_iop_pyramidal_contrast_gui_data_t;
 
 
@@ -219,6 +229,63 @@ dt_iop_colorspace_type_t default_colorspace(dt_iop_module_t *self,
                                             dt_dev_pixelpipe_iop_t *piece)
 {
   return IOP_CS_RGB;
+}
+
+int legacy_params(dt_iop_module_t *self,
+                  const void *const old_params,
+                  const int old_version,
+                  void **new_params,
+                  int32_t *new_params_size,
+                  int *new_version)
+{
+  typedef struct dt_iop_pyramidal_contrast_params_v1_t
+  {
+    float micro_scale;
+    float fine_scale;
+    float detail_scale;
+    float medium_scale;
+    float broad_scale;
+    float global_scale;
+    float blending;
+    float feathering;
+    dt_iop_pyramidal_contrast_filter_t details;
+    dt_iop_luminance_mask_method_t method;
+    int iterations;
+  } dt_iop_pyramidal_contrast_params_v1_t;
+
+  if(old_version == 1)
+  {
+    const dt_iop_pyramidal_contrast_params_v1_t *o = (dt_iop_pyramidal_contrast_params_v1_t *)old_params;
+    dt_iop_pyramidal_contrast_params_t *n = malloc(sizeof(dt_iop_pyramidal_contrast_params_t));
+
+    // Copie manuelle pour éviter d'écraser les nouveaux champs insérés au milieu
+    n->micro_scale = o->micro_scale;
+    n->fine_scale = o->fine_scale;
+    n->detail_scale = o->detail_scale;
+    n->medium_scale = o->medium_scale;
+    n->broad_scale = o->broad_scale;
+    n->global_scale = o->global_scale;
+    n->blending = o->blending;
+    n->feathering = o->feathering;
+
+    // Initialisation des nouveaux champs
+    n->f_mult_micro = 0.5f;
+    n->f_mult_fine = 0.75f;
+    n->f_mult_detail = 1.0f;
+    n->f_mult_medium = 1.25f;
+    n->f_mult_broad = 1.5f;
+
+    // Copie de la fin de la structure v1
+    n->details = o->details;
+    n->method = o->method;
+    n->iterations = o->iterations;
+
+    *new_params = n;
+    *new_params_size = sizeof(dt_iop_pyramidal_contrast_params_t);
+    *new_version = 2;
+    return 0;
+  }
+  return 1;
 }
 
 /**
@@ -598,11 +665,16 @@ static void pyramidal_contrast_process(dt_iop_module_t *self,
       if(hash != saved_hash || !luminance_valid)
       {
         compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * 1.5f);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * 1.25f);
-        compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering * 0.75f);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering * 0.5f);
+        if(d->broad_scale != 1.0f)
+          compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * d->f_mult_broad);
+        if(d->medium_scale != 1.0f)
+          compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * d->f_mult_medium);
+        if(d->detail_scale != 1.0f)
+          compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering * d->f_mult_detail);
+        if(d->fine_scale != 1.0f)
+          compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering * d->f_mult_fine);
+        if(d->micro_scale != 1.0f)
+          compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering * d->f_mult_micro);
         hash_set_get(&hash, &g->ui_preview_hash, &self->gui_lock);
       }
     }
@@ -620,11 +692,16 @@ static void pyramidal_contrast_process(dt_iop_module_t *self,
         dt_iop_gui_enter_critical_section(self);
         g->thumb_preview_hash = hash;
         compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * 1.5f);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * 1.25f);
-        compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering * 0.75f);
-        compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering * 0.5f);
+        if(d->broad_scale != 1.0f)
+          compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * d->f_mult_broad);
+        if(d->medium_scale != 1.0f)
+          compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * d->f_mult_medium);
+        if(d->detail_scale != 1.0f)
+          compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering * d->f_mult_detail);
+        if(d->fine_scale != 1.0f)
+          compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering * d->f_mult_fine);
+        if(d->micro_scale != 1.0f)
+          compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering * d->f_mult_micro);
         g->luminance_valid = TRUE;
         dt_iop_gui_leave_critical_section(self);
         dt_dev_pixelpipe_cache_invalidate_later(piece->pipe, self->iop_order);
@@ -633,9 +710,6 @@ static void pyramidal_contrast_process(dt_iop_module_t *self,
     else
     {
       compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-      compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * 1.5f);
-      compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * 1.25f);
-      compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering);
       compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius / 2, d->feathering * 0.75f);
       compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius / 4, d->feathering * 0.5f);
     }
@@ -708,11 +782,11 @@ void modify_roi_in(dt_iop_module_t *self,
   const int radius = (int)((diameter - 1.0f) / 2.0f);
   d->radius = radius;
 
-  const float blending_broad = ((1.0f - d->blending) * 0.5f) + d->blending;
+  const float blending_broad = ((1.0f - d->blending) * 0.25f) + d->blending;
   const float diameter_broad = blending_broad * max_size * roi_in->scale;
   d->radius_broad = (int)((diameter_broad - 1.0f) / 2.0f);
 
-  const float blending_medium = ((1.0f - d->blending) * 0.25f) + d->blending;
+  const float blending_medium = ((1.0f - d->blending) * 0.125f) + d->blending;
   const float diameter_medium = blending_medium * max_size * roi_in->scale;
   d->radius_medium = (int)((diameter_medium - 1.0f) / 2.0f);
 
@@ -767,6 +841,12 @@ void commit_params(dt_iop_module_t *self,
   // UI guided filter feathering param increases edge taping
   // but actual regularization behaves inversely
   d->feathering = 1.0f / p->feathering;
+
+  d->f_mult_micro = p->f_mult_micro;
+  d->f_mult_fine = p->f_mult_fine;
+  d->f_mult_detail = p->f_mult_detail;
+  d->f_mult_medium = p->f_mult_medium;
+  d->f_mult_broad = p->f_mult_broad;
 }
 
 
@@ -843,6 +923,8 @@ void gui_update(dt_iop_module_t *self)
   dt_bauhaus_widget_set_quad_active(g->detail_scale, g->mask_display == DT_LC_MASK_DETAIL);
   dt_bauhaus_widget_set_quad_active(g->fine_scale, g->mask_display == DT_LC_MASK_FINE);
   dt_bauhaus_widget_set_quad_active(g->micro_scale, g->mask_display == DT_LC_MASK_MICRO);
+
+  dt_gui_update_collapsible_section(&g->advanced_expander);
 }
 
 
@@ -852,7 +934,9 @@ void gui_changed(dt_iop_module_t *self,
 {
   const dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
 
-  if(w == g->blending || w == g->feathering)
+  if(w == g->blending || w == g->feathering
+     || w == g->f_mult_micro || w == g->f_mult_fine || w == g->f_mult_detail
+     || w == g->f_mult_medium || w == g->f_mult_broad)
   {
     invalidate_luminance_cache(self);
   }
@@ -981,7 +1065,6 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->micro_scale, _("amount of micro contrast enhancement"));
   dt_bauhaus_widget_set_quad(g->micro_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
                              _("visualize micro contrast mask"));
-  dt_gui_box_add(self->widget, g->micro_scale);
 
   // Fine detail slider
   g->fine_scale = dt_bauhaus_slider_from_params(self, "fine_scale");
@@ -990,7 +1073,6 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->fine_scale, _("amount of fine contrast enhancement"));
   dt_bauhaus_widget_set_quad(g->fine_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
                              _("visualize fine contrast mask"));
-  dt_gui_box_add(self->widget, g->fine_scale);
 
   // Detail boost slider
   g->detail_scale = dt_bauhaus_slider_from_params(self, "detail_scale");
@@ -1004,7 +1086,6 @@ void gui_init(dt_iop_module_t *self)
        "< 1.0 = reduce local contrast"));
   dt_bauhaus_widget_set_quad(g->detail_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
                              _("visualize local contrast mask"));
-  dt_gui_box_add(self->widget, g->detail_scale);
 
   // Medium detail slider
   g->medium_scale = dt_bauhaus_slider_from_params(self, "medium_scale");
@@ -1013,7 +1094,6 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->medium_scale, _("amount of broad contrast enhancement"));
   dt_bauhaus_widget_set_quad(g->medium_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
                              _("visualize broad contrast mask"));
-  dt_gui_box_add(self->widget, g->medium_scale);
 
   // Broad detail slider
   g->broad_scale = dt_bauhaus_slider_from_params(self, "broad_scale");
@@ -1022,7 +1102,6 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->broad_scale, _("amount of extended contrast enhancement"));
   dt_bauhaus_widget_set_quad(g->broad_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
                              _("visualize extended contrast mask"));
-  dt_gui_box_add(self->widget, g->broad_scale);
 
   // Global contrast slider
   g->global_scale = dt_bauhaus_slider_from_params(self, "global_scale");
@@ -1031,11 +1110,11 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text
     (g->global_scale,
      _("amount of global contrast enhancement"));
-  dt_gui_box_add(self->widget, g->global_scale);
 
   // Separator
-  gtk_widget_set_margin_top(dt_ui_section_label_new(C_("section", "masking")), DT_PIXEL_APPLY_DPI(10));
-  dt_gui_box_add(self->widget, dt_ui_section_label_new(C_("section", "masking")));
+  GtkWidget *label = dt_ui_section_label_new(C_("section", "masking"));
+  gtk_widget_set_margin_top(label, DT_PIXEL_APPLY_DPI(10));
+  dt_gui_box_add(self->widget, label);
 
   g->blending = dt_bauhaus_slider_from_params(self, "blending");
   dt_bauhaus_slider_set_soft_range(g->blending, 1.0, 4.0);
@@ -1044,12 +1123,43 @@ void gui_init(dt_iop_module_t *self)
      _("size of the smoothing area as percentage of image size\n"
        "larger = affects broader features\n"
        "smaller = affects finer details"));
-  dt_gui_box_add(self->widget, g->blending);
 
   g->feathering = dt_bauhaus_slider_from_params(self, "feathering");
   dt_bauhaus_slider_set_soft_range(g->feathering, 0.1, 50.0);
   gtk_widget_set_tooltip_text(g->feathering, _("edges refinement"));
-  dt_gui_box_add(self->widget, g->feathering);
+
+  // Save main widget
+  GtkWidget *main_box = self->widget;
+
+  // Create section
+  dt_gui_new_collapsible_section(&g->advanced_expander, "plugins/darkroom/pyramidal_contrast/expanded_advanced",
+                                 _("feathering fine tuning"), GTK_BOX(main_box), DT_ACTION(self));
+  
+  // Switch self->widget to the section container
+  self->widget = GTK_WIDGET(g->advanced_expander.container);
+
+  g->f_mult_micro = dt_bauhaus_slider_from_params(self, "f_mult_micro");
+  dt_bauhaus_slider_set_digits(g->f_mult_micro, 2);
+  dt_bauhaus_slider_set_soft_range(g->f_mult_micro, 0.1, 3.0);
+
+  g->f_mult_fine = dt_bauhaus_slider_from_params(self, "f_mult_fine");
+  dt_bauhaus_slider_set_digits(g->f_mult_fine, 2);
+  dt_bauhaus_slider_set_soft_range(g->f_mult_fine, 0.1, 3.0);
+
+  g->f_mult_detail = dt_bauhaus_slider_from_params(self, "f_mult_detail");
+  dt_bauhaus_slider_set_digits(g->f_mult_detail, 2);
+  dt_bauhaus_slider_set_soft_range(g->f_mult_detail, 0.1, 3.0);
+
+  g->f_mult_medium = dt_bauhaus_slider_from_params(self, "f_mult_medium");
+  dt_bauhaus_slider_set_digits(g->f_mult_medium, 2);
+  dt_bauhaus_slider_set_soft_range(g->f_mult_medium, 0.1, 3.0);
+
+  g->f_mult_broad = dt_bauhaus_slider_from_params(self, "f_mult_broad");
+  dt_bauhaus_slider_set_digits(g->f_mult_broad, 2);
+  dt_bauhaus_slider_set_soft_range(g->f_mult_broad, 0.1, 3.0);
+
+  // Restore main widget
+  self->widget = main_box;
 
   // Connect signals for pipe events
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_PREVIEW_PIPE_FINISHED, _develop_preview_pipe_finished_callback);

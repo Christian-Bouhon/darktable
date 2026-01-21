@@ -30,8 +30,8 @@
  *
  * The module should be placed early in the pipe (before color profile)
  * as it operates on scene-linear RGB data.
- * A Modifier
- ***/
+ * A Compléter
+ *  ***/
 
 
 #include "common/extra_optimizations.h"
@@ -1226,7 +1226,7 @@ void gui_init(dt_iop_module_t *self)
 
   // Create section for scale multipliers
   dt_gui_new_collapsible_section(&g->scale_expander, "plugins/darkroom/pyramidal_contrast/expanded_scale",
-                                 _("feature scale multipliers"), GTK_BOX(main_box), DT_ACTION(self));
+                                 _("feature scale fine tuning"), GTK_BOX(main_box), DT_ACTION(self));
   
   // Switch self->widget to the section container
   self->widget = GTK_WIDGET(g->scale_expander.container);

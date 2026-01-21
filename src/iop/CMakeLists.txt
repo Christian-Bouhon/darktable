@@ -4,6 +4,8 @@ include(manage-symbol-visibility)
 
 add_definitions(-include common/module_api.h)
 add_definitions(-include iop/iop_api.h)
+# ajouter pour dual mode CB
+message(STATUS "Plugins install path: ${CMAKE_INSTALL_LIBDIR}/darktable/plugins")
 
 set(_iop_list "")
 set(_iop_default_visible_list "")
@@ -144,6 +146,7 @@ else(GMIC_FOUND)
 endif(GMIC_FOUND)
 add_iop(toneequal "toneequal.c" DEFAULT_VISIBLE)
 add_iop(local_contrast_rgb "local_contrast_rgb.c")
+add_iop(contrast_dual_mode "contrast_dual_mode.c")
 add_iop(pyramidal_contrast "pyramidal_contrast.c")
 add_iop(filmicrgb "filmicrgb.c")
 add_iop(negadoctor "negadoctor.c")

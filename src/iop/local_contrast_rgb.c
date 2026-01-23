@@ -38,7 +38,6 @@
  *
  ***/
 
- 
 #include "common/extra_optimizations.h"
 
 #include <assert.h>

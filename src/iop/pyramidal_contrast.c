@@ -683,15 +683,15 @@ static void pyramidal_contrast_process(dt_iop_module_t *self,
       if(hash != saved_hash || !luminance_valid)
       {
         compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-        if(d->broad_scale != 1.0f)
+        if(d->broad_scale != 1.0f || g->mask_display == DT_LC_MASK_BROAD)
           compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * d->f_mult_broad);
-        if(d->medium_scale != 1.0f)
+        if(d->medium_scale != 1.0f || g->mask_display == DT_LC_MASK_MEDIUM)
           compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * d->f_mult_medium);
-        if(d->detail_scale != 1.0f)
+        if(d->detail_scale != 1.0f || g->mask_display == DT_LC_MASK_DETAIL)
           compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering * d->f_mult_detail);
-        if(d->fine_scale != 1.0f)
+        if(d->fine_scale != 1.0f || g->mask_display == DT_LC_MASK_FINE)
           compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering * d->f_mult_fine);
-        if(d->micro_scale != 1.0f)
+        if(d->micro_scale != 1.0f || g->mask_display == DT_LC_MASK_MICRO)
           compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering * d->f_mult_micro);
         hash_set_get(&hash, &g->ui_preview_hash, &self->gui_lock);
       }
@@ -710,15 +710,15 @@ static void pyramidal_contrast_process(dt_iop_module_t *self,
         dt_iop_gui_enter_critical_section(self);
         g->thumb_preview_hash = hash;
         compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
-        if(d->broad_scale != 1.0f)
+        if(d->broad_scale != 1.0f || g->mask_display == DT_LC_MASK_BROAD)
           compute_smoothed_luminance_mask(in, luminance_smoothed_broad, width, height, d, d->radius_broad, d->feathering * d->f_mult_broad);
-        if(d->medium_scale != 1.0f)
+        if(d->medium_scale != 1.0f || g->mask_display == DT_LC_MASK_MEDIUM)
           compute_smoothed_luminance_mask(in, luminance_smoothed_medium, width, height, d, d->radius_medium, d->feathering * d->f_mult_medium);
-        if(d->detail_scale != 1.0f)
+        if(d->detail_scale != 1.0f || g->mask_display == DT_LC_MASK_DETAIL)
           compute_smoothed_luminance_mask(in, luminance_smoothed, width, height, d, d->radius, d->feathering * d->f_mult_detail);
-        if(d->fine_scale != 1.0f)
+        if(d->fine_scale != 1.0f || g->mask_display == DT_LC_MASK_FINE)
           compute_smoothed_luminance_mask(in, luminance_smoothed_fine, width, height, d, d->radius_fine, d->feathering * d->f_mult_fine);
-        if(d->micro_scale != 1.0f)
+        if(d->micro_scale != 1.0f || g->mask_display == DT_LC_MASK_MICRO)
           compute_smoothed_luminance_mask(in, luminance_smoothed_micro, width, height, d, d->radius_micro, d->feathering * d->f_mult_micro);
         g->luminance_valid = TRUE;
         dt_iop_gui_leave_critical_section(self);
@@ -840,6 +840,7 @@ void commit_params(dt_iop_module_t *self,
   d->method = DT_TONEEQ_NORM_2;
   d->details = DT_LC_EIGF;
   d->iterations = 1;
+  d->scale = 1.0f;
   d->micro_scale = p->micro_scale;
   d->fine_scale = p->fine_scale;
   d->detail_scale = p->detail_scale;
@@ -967,7 +968,7 @@ static void _set_mask_display(dt_iop_module_t *self, dt_iop_pyramidal_contrast_m
 
   _update_mask_buttons_state(g);
 
-  dt_iop_refresh_center(self);
+  invalidate_luminance_cache(self);
 }
 
 static gboolean _mask_toggle_callback(GtkWidget *togglebutton, GdkEventButton *event, dt_iop_module_t *self)

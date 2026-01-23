@@ -38,7 +38,6 @@
  *
  ***/
 
- 
 #include "common/extra_optimizations.h"
 
 #include <assert.h>
@@ -522,7 +521,7 @@ static void local_contrast_process(dt_iop_module_t *self,
   if(piece->colors != 4) return;
 
   // Fast path: if no scales are active, just copy
-  if(!has_active_scales(d))
+  if(!has_active_scales(d) && (!g || g->mask_display_scale == -1))
   {
     dt_iop_image_copy_by_size(out, in, width, height, 4);
     return;
@@ -625,7 +624,7 @@ static void local_contrast_process(dt_iop_module_t *self,
         // Compute smoothed luminance for each active scale
         for(int s = 0; s < N_SCALES; s++)
         {
-          if(scale_is_active(d->scales[s].detail_boost))
+          if(scale_is_active(d->scales[s].detail_boost) || (g && g->mask_display_scale == s))
           {
             compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                                  width, height,
@@ -657,7 +656,7 @@ static void local_contrast_process(dt_iop_module_t *self,
         // Compute smoothed luminance for each active scale
         for(int s = 0; s < N_SCALES; s++)
         {
-          if(scale_is_active(d->scales[s].detail_boost))
+          if(scale_is_active(d->scales[s].detail_boost) || (g && g->mask_display_scale == s))
           {
             compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                                  width, height,
@@ -695,7 +694,7 @@ static void local_contrast_process(dt_iop_module_t *self,
     compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
     for(int s = 0; s < N_SCALES; s++)
     {
-      if(scale_is_active(d->scales[s].detail_boost))
+      if(scale_is_active(d->scales[s].detail_boost) || (g && g->mask_display_scale == s))
       {
         compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                              width, height,
@@ -979,7 +978,7 @@ static void show_mask_callback(GtkWidget *togglebutton,
                                  g->mask_display_scale == s);
   }
 
-  dt_iop_refresh_center(self);
+  invalidate_luminance_cache(self);
 }
 
 

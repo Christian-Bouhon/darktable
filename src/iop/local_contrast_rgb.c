@@ -710,7 +710,7 @@ static void local_contrast_process(dt_iop_module_t *self,
   {
     const int display_scale = g->mask_display_scale;
     if(display_scale >= 0 && display_scale < N_SCALES
-       && scale_is_active(d->scales[display_scale].detail_boost)
+ // && scale_is_active(d->scales[display_scale].detail_boost)
        && luminance_smoothed[display_scale])
     {
       display_detail_mask_for_scale(luminance_pixel, luminance_smoothed[display_scale],

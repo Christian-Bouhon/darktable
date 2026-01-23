@@ -30,8 +30,8 @@
  *
  * The module should be placed early in the pipe (before color profile)
  * as it operates on scene-linear RGB data.
- * A Compléter
- *  ***/
+ * A Modifier
+ ***/
 
 
 #include "common/extra_optimizations.h"
@@ -200,12 +200,9 @@ typedef struct dt_iop_pyramidal_contrast_gui_data_t
   GtkWidget *feathering;
   dt_gui_collapsible_section_t advanced_expander;
   GtkWidget *f_mult_micro, *f_mult_fine, *f_mult_detail, *f_mult_medium, *f_mult_broad;
-  dt_gui_collapsible_section_t scale_expander;
-  GtkWidget *s_mult_micro, *s_mult_fine, *s_mult_detail, *s_mult_medium, *s_mult_broad;
 
   // New buttons for mask display in expanders
   GtkWidget *f_view_broad, *f_view_medium, *f_view_detail, *f_view_fine, *f_view_micro;
-  GtkWidget *s_view_broad, *s_view_medium, *s_view_detail, *s_view_fine, *s_view_micro;
 } dt_iop_pyramidal_contrast_gui_data_t;
 
 
@@ -940,12 +937,6 @@ static void _update_mask_buttons_state(dt_iop_pyramidal_contrast_gui_data_t *g)
   if(g->f_view_fine) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->f_view_fine), g->mask_display == DT_LC_MASK_FINE);
   if(g->f_view_micro) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->f_view_micro), g->mask_display == DT_LC_MASK_MICRO);
 
-  if(g->s_view_broad) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->s_view_broad), g->mask_display == DT_LC_MASK_BROAD);
-  if(g->s_view_medium) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->s_view_medium), g->mask_display == DT_LC_MASK_MEDIUM);
-  if(g->s_view_detail) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->s_view_detail), g->mask_display == DT_LC_MASK_DETAIL);
-  if(g->s_view_fine) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->s_view_fine), g->mask_display == DT_LC_MASK_FINE);
-  if(g->s_view_micro) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->s_view_micro), g->mask_display == DT_LC_MASK_MICRO);
-
   --darktable.gui->reset;
 }
 
@@ -996,6 +987,8 @@ static void _create_slider_with_mask_button(dt_iop_module_t *self, GtkWidget *co
   *slider_widget = dt_bauhaus_slider_from_params(self, param_name);
   dt_bauhaus_slider_set_digits(*slider_widget, 2);
   dt_bauhaus_slider_set_soft_range(*slider_widget, 0.1, 3.0);
+  dt_bauhaus_slider_set_format(*slider_widget, "%");
+  dt_bauhaus_slider_set_factor(*slider_widget, 100.0);
 
   g_object_ref(*slider_widget);
   gtk_container_remove(GTK_CONTAINER(self->widget), *slider_widget);
@@ -1041,9 +1034,7 @@ void gui_changed(dt_iop_module_t *self,
 
   if(w == g->blending || w == g->feathering
      || w == g->f_mult_micro || w == g->f_mult_fine || w == g->f_mult_detail
-     || w == g->f_mult_medium || w == g->f_mult_broad
-     || w == g->s_mult_micro || w == g->s_mult_fine || w == g->s_mult_detail
-     || w == g->s_mult_medium || w == g->s_mult_broad)
+     || w == g->f_mult_medium || w == g->f_mult_broad)
   {
     invalidate_luminance_cache(self);
   }
@@ -1139,6 +1130,8 @@ void gui_init(dt_iop_module_t *self)
   g->micro_scale = dt_bauhaus_slider_from_params(self, "micro_scale");
   dt_bauhaus_slider_set_soft_range(g->micro_scale, 0.25, 3.0);
   dt_bauhaus_slider_set_digits(g->micro_scale, 2);
+  dt_bauhaus_slider_set_format(g->micro_scale, "%");
+  dt_bauhaus_slider_set_factor(g->micro_scale, 100.0);
   gtk_widget_set_tooltip_text(g->micro_scale, _("amount of micro contrast enhancement"));
   dt_bauhaus_widget_set_quad(g->micro_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
                              _("visualize micro contrast mask"));
@@ -1147,6 +1140,8 @@ void gui_init(dt_iop_module_t *self)
   g->fine_scale = dt_bauhaus_slider_from_params(self, "fine_scale");
   dt_bauhaus_slider_set_soft_range(g->fine_scale, 0.25, 3.0);
   dt_bauhaus_slider_set_digits(g->fine_scale, 2);
+  dt_bauhaus_slider_set_format(g->fine_scale, "%");
+  dt_bauhaus_slider_set_factor(g->fine_scale, 100.0);
   gtk_widget_set_tooltip_text(g->fine_scale, _("amount of fine contrast enhancement"));
   dt_bauhaus_widget_set_quad(g->fine_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
                              _("visualize fine contrast mask"));
@@ -1155,6 +1150,8 @@ void gui_init(dt_iop_module_t *self)
   g->detail_scale = dt_bauhaus_slider_from_params(self, "detail_scale");
   dt_bauhaus_slider_set_soft_range(g->detail_scale, 0.25, 3.0);
   dt_bauhaus_slider_set_digits(g->detail_scale, 2);
+  dt_bauhaus_slider_set_format(g->detail_scale, "%");
+  dt_bauhaus_slider_set_factor(g->detail_scale, 100.0);
   gtk_widget_set_tooltip_text
     (g->detail_scale,
      _("amount of local contrast enhancement\n"
@@ -1168,6 +1165,8 @@ void gui_init(dt_iop_module_t *self)
   g->medium_scale = dt_bauhaus_slider_from_params(self, "medium_scale");
   dt_bauhaus_slider_set_soft_range(g->medium_scale, 0.25, 3.0);
   dt_bauhaus_slider_set_digits(g->medium_scale, 2);
+  dt_bauhaus_slider_set_format(g->medium_scale, "%");
+  dt_bauhaus_slider_set_factor(g->medium_scale, 100.0);
   gtk_widget_set_tooltip_text(g->medium_scale, _("amount of broad contrast enhancement"));
   dt_bauhaus_widget_set_quad(g->medium_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
                              _("visualize broad contrast mask"));
@@ -1176,6 +1175,8 @@ void gui_init(dt_iop_module_t *self)
   g->broad_scale = dt_bauhaus_slider_from_params(self, "broad_scale");
   dt_bauhaus_slider_set_soft_range(g->broad_scale, 0.25, 3.0);
   dt_bauhaus_slider_set_digits(g->broad_scale, 2);
+  dt_bauhaus_slider_set_format(g->broad_scale, "%");
+  dt_bauhaus_slider_set_factor(g->broad_scale, 100.0);
   gtk_widget_set_tooltip_text(g->broad_scale, _("amount of extended contrast enhancement"));
   dt_bauhaus_widget_set_quad(g->broad_scale, self, dtgtk_cairo_paint_showmask, TRUE, _quad_callback,
                              _("visualize extended contrast mask"));
@@ -1184,6 +1185,8 @@ void gui_init(dt_iop_module_t *self)
   g->global_scale = dt_bauhaus_slider_from_params(self, "global_scale");
   dt_bauhaus_slider_set_soft_range(g->global_scale, 0.25, 3.0);
   dt_bauhaus_slider_set_digits(g->global_scale, 2);
+  dt_bauhaus_slider_set_format(g->global_scale, "%");
+  dt_bauhaus_slider_set_factor(g->global_scale, 100.0);
   gtk_widget_set_tooltip_text
     (g->global_scale,
      _("amount of global contrast enhancement"));
@@ -1195,6 +1198,8 @@ void gui_init(dt_iop_module_t *self)
 
   g->blending = dt_bauhaus_slider_from_params(self, "blending");
   dt_bauhaus_slider_set_soft_range(g->blending, 1.0, 4.0);
+  dt_bauhaus_slider_set_format(g->blending, "%");
+  dt_bauhaus_slider_set_factor(g->blending, 10.0);
   gtk_widget_set_tooltip_text
     (g->blending,
      _("size of the smoothing area as percentage of image size\n"
@@ -1220,22 +1225,6 @@ void gui_init(dt_iop_module_t *self)
   _create_slider_with_mask_button(self, self->widget, &g->f_mult_detail, &g->f_view_detail, "f_mult_detail", _("visualize local contrast mask"), DT_LC_MASK_DETAIL);
   _create_slider_with_mask_button(self, self->widget, &g->f_mult_medium, &g->f_view_medium, "f_mult_medium", _("visualize broad contrast mask"), DT_LC_MASK_MEDIUM);
   _create_slider_with_mask_button(self, self->widget, &g->f_mult_broad, &g->f_view_broad, "f_mult_broad", _("visualize extended contrast mask"), DT_LC_MASK_BROAD);
-
-  // Restore main widget
-  self->widget = main_box;
-
-  // Create section for scale multipliers
-  dt_gui_new_collapsible_section(&g->scale_expander, "plugins/darkroom/pyramidal_contrast/expanded_scale",
-                                 _("feature scale fine tuning"), GTK_BOX(main_box), DT_ACTION(self));
-  
-  // Switch self->widget to the section container
-  self->widget = GTK_WIDGET(g->scale_expander.container);
-
-  _create_slider_with_mask_button(self, self->widget, &g->s_mult_micro, &g->s_view_micro, "s_mult_micro", _("visualize micro contrast mask"), DT_LC_MASK_MICRO);
-  _create_slider_with_mask_button(self, self->widget, &g->s_mult_fine, &g->s_view_fine, "s_mult_fine", _("visualize fine contrast mask"), DT_LC_MASK_FINE);
-  _create_slider_with_mask_button(self, self->widget, &g->s_mult_detail, &g->s_view_detail, "s_mult_detail", _("visualize local contrast mask"), DT_LC_MASK_DETAIL);
-  _create_slider_with_mask_button(self, self->widget, &g->s_mult_medium, &g->s_view_medium, "s_mult_medium", _("visualize broad contrast mask"), DT_LC_MASK_MEDIUM);
-  _create_slider_with_mask_button(self, self->widget, &g->s_mult_broad, &g->s_view_broad, "s_mult_broad", _("visualize extended contrast mask"), DT_LC_MASK_BROAD);
 
   // Restore main widget
   self->widget = main_box;

@@ -71,7 +71,7 @@
 #endif
 
 
-DT_MODULE_INTROSPECTION(2, dt_iop_local_contrast_rgb_params_t)
+DT_MODULE_INTROSPECTION(1, dt_iop_local_contrast_rgb_params_t)
 
 
 /** Number of independent detail scales */
@@ -98,8 +98,8 @@ typedef enum dt_iop_local_contrast_rgb_filter_t
 typedef struct dt_iop_local_contrast_rgb_params_t
 {
   // Per-scale parameters
-  float detail_scale[N_SCALES];   // $MIN: 0.0 $MAX: 5.0 $DEFAULT: 1.0 $DESCRIPTION: "detail boost"
-  float blending[N_SCALES];       // $MIN: 0.01 $MAX: 100.0 $DEFAULT: 12.0 $DESCRIPTION: "feature scale"
+  float detail_boost[N_SCALES];   // $MIN: 0.0 $MAX: 500.0 $DEFAULT: 100.0 $DESCRIPTION: "detail boost"
+  float feature_scale[N_SCALES];       // $MIN: 0.01 $MAX: 100.0 $DEFAULT: 12.0 $DESCRIPTION: "feature scale"
   float feathering[N_SCALES];     // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "edges refinement"
 
   // Shared parameters
@@ -114,10 +114,10 @@ typedef struct dt_iop_local_contrast_rgb_params_t
  **/
 typedef struct dt_iop_local_contrast_rgb_scale_data_t
 {
-  float detail_scale;
-  float blending;
+  float detail_boost;
+  float feature_scale;
   float feathering;
-  int radius;    // derived from blending and image size
+  int radius;    // derived from feature_scale and image size
 } dt_iop_local_contrast_rgb_scale_data_t;
 
 
@@ -165,8 +165,8 @@ typedef struct dt_iop_local_contrast_rgb_gui_data_t
   gboolean luminance_valid;
 
   // Per-scale GTK widgets
-  GtkWidget *detail_scale[N_SCALES];
-  GtkWidget *blending[N_SCALES];
+  GtkWidget *detail_boost[N_SCALES];
+  GtkWidget *feature_scale[N_SCALES];
   GtkWidget *feathering[N_SCALES];
   GtkWidget *show_mask[N_SCALES];
 
@@ -214,64 +214,6 @@ dt_iop_colorspace_type_t default_colorspace(dt_iop_module_t *self,
   return IOP_CS_RGB;
 }
 
-
-int legacy_params(dt_iop_module_t *self,
-                  const void *const old_params,
-                  const int old_version,
-                  void **new_params,
-                  int32_t *new_params_size,
-                  int *new_version)
-{
-  if(old_version == 1)
-  {
-    // Version 1 had single-scale parameters
-    typedef struct dt_iop_local_contrast_rgb_params_v1_t
-    {
-      float detail_scale;
-      float blending;
-      float feathering;
-      dt_iop_local_contrast_rgb_filter_t details;
-      dt_iop_luminance_mask_method_t method;
-      int iterations;
-    } dt_iop_local_contrast_rgb_params_v1_t;
-
-    const dt_iop_local_contrast_rgb_params_v1_t *o =
-      (dt_iop_local_contrast_rgb_params_v1_t *)old_params;
-
-    // Allocate new params
-    dt_iop_local_contrast_rgb_params_t *n =
-      (dt_iop_local_contrast_rgb_params_t *)calloc(1, sizeof(dt_iop_local_contrast_rgb_params_t));
-    if(!n) return 1;
-
-    // Initialize with defaults
-    for(int s = 0; s < N_SCALES; s++)
-    {
-      n->detail_scale[s] = 1.0f;  // no effect
-      n->blending[s] = 12.0f;
-      n->feathering[s] = 5.0f;
-    }
-
-    // Copy first scale from v1 params
-    n->detail_scale[0] = o->detail_scale;
-    n->blending[0] = o->blending;
-    n->feathering[0] = o->feathering;
-
-    // Copy shared params
-    n->details = o->details;
-    n->method = o->method;
-    n->iterations = o->iterations;
-
-    *new_params = n;
-    *new_params_size = sizeof(dt_iop_local_contrast_rgb_params_t);
-    *new_version = 2;
-
-    return 0;
-  }
-
-  return 1;
-}
-
-
 /**
  * Helper functions
  **/
@@ -300,13 +242,13 @@ static void invalidate_luminance_cache(dt_iop_module_t *const self)
 
 
 /**
- * Check if any scale is active (detail_scale != 1.0)
+ * Check if any scale is active (detail_boost != 1.0)
  **/
 static inline gboolean has_active_scales(const dt_iop_local_contrast_rgb_data_t *const d)
 {
   for(int s = 0; s < N_SCALES; s++)
   {
-    if(d->scales[s].detail_scale != 1.0f) return TRUE;
+    if(d->scales[s].detail_boost != 1.0f) return TRUE;
   }
   return FALSE;
 }
@@ -315,9 +257,9 @@ static inline gboolean has_active_scales(const dt_iop_local_contrast_rgb_data_t 
 /**
  * Check if a specific scale is active
  **/
-static inline gboolean scale_is_active(const float detail_scale)
+static inline gboolean scale_is_active(const float detail_boost)
 {
-  return detail_scale != 1.0f;
+  return detail_boost != 1.0f;
 }
 
 
@@ -418,14 +360,14 @@ static inline void apply_multiscale_local_contrast(
   const size_t npixels = width * height;
 
   // Unpack scale data for vectorization
-  float detail_scales[N_SCALES] DT_ALIGNED_PIXEL;
+  float detail_boosts[N_SCALES] DT_ALIGNED_PIXEL;
   gboolean active[N_SCALES];
   int n_active = 0;
 
   for(int s = 0; s < N_SCALES; s++)
   {
-    detail_scales[s] = d->scales[s].detail_scale;
-    active[s] = scale_is_active(detail_scales[s]);
+    detail_boosts[s] = d->scales[s].detail_boost;
+    active[s] = scale_is_active(detail_boosts[s]);
     if(active[s]) n_active++;
   }
 
@@ -453,9 +395,9 @@ static inline void apply_multiscale_local_contrast(
       // compared to its local neighborhood at this scale
       const float detail_ev = log2f(lum_pixel / lum_smoothed);
 
-      // Scale the detail: detail_scale = 1.0 means no change
+      // Scale the detail: detail_boost = 1.0 means no change
       // > 1.0 boosts local contrast, < 1.0 reduces it
-      const float scaled_detail_ev = detail_scales[s] * detail_ev;
+      const float scaled_detail_ev = detail_boosts[s] * detail_ev;
 
       // The correction is the difference between scaled and original detail
       total_correction_ev += scaled_detail_ev - detail_ev;
@@ -682,7 +624,7 @@ static void local_contrast_process(dt_iop_module_t *self,
         // Compute smoothed luminance for each active scale
         for(int s = 0; s < N_SCALES; s++)
         {
-          if(scale_is_active(d->scales[s].detail_scale))
+          if(scale_is_active(d->scales[s].detail_boost))
           {
             compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                                  width, height,
@@ -714,7 +656,7 @@ static void local_contrast_process(dt_iop_module_t *self,
         // Compute smoothed luminance for each active scale
         for(int s = 0; s < N_SCALES; s++)
         {
-          if(scale_is_active(d->scales[s].detail_scale))
+          if(scale_is_active(d->scales[s].detail_boost))
           {
             compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                                  width, height,
@@ -735,7 +677,7 @@ static void local_contrast_process(dt_iop_module_t *self,
       compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
       for(int s = 0; s < N_SCALES; s++)
       {
-        if(scale_is_active(d->scales[s].detail_scale))
+        if(scale_is_active(d->scales[s].detail_boost))
         {
           compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                                width, height,
@@ -752,7 +694,7 @@ static void local_contrast_process(dt_iop_module_t *self,
     compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
     for(int s = 0; s < N_SCALES; s++)
     {
-      if(scale_is_active(d->scales[s].detail_scale))
+      if(scale_is_active(d->scales[s].detail_boost))
       {
         compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                              width, height,
@@ -768,7 +710,7 @@ static void local_contrast_process(dt_iop_module_t *self,
   {
     const int display_scale = g->mask_display_scale;
     if(display_scale >= 0 && display_scale < N_SCALES
-       && scale_is_active(d->scales[display_scale].detail_scale)
+       && scale_is_active(d->scales[display_scale].detail_boost)
        && luminance_smoothed[display_scale])
     {
       display_detail_mask_for_scale(luminance_pixel, luminance_smoothed[display_scale],
@@ -818,7 +760,7 @@ void modify_roi_in(dt_iop_module_t *self,
 
   for(int s = 0; s < N_SCALES; s++)
   {
-    const float diameter = d->scales[s].blending * max_size * roi_in->scale;
+    const float diameter = d->scales[s].feature_scale * max_size * roi_in->scale;
     const int radius = (int)((diameter - 1.0f) / 2.0f);
     d->scales[s].radius = radius;
   }
@@ -843,11 +785,18 @@ void reload_defaults(dt_iop_module_t *self)
 {
   dt_iop_local_contrast_rgb_params_t *d = self->default_params;
 
-  // Set first scale to have a visible effect by default
-  // Other scales remain at 1.0 (no effect)
-  d->detail_scale[0] = 1.5f;
-  for(int s = 1; s < N_SCALES; s++)
-    d->detail_scale[s] = 1.0f;
+  // Set 12% scale to have a visible effect by default
+  // because this resembles a clarity-like effect
+  // Other scales remain at 100% (no effect)
+  for(int s = 0; s < N_SCALES; s++)
+    if(s != 1)
+      d->detail_boost[s] = 100.0f;
+    else
+      d->detail_boost[s] = 150.0f;
+
+  d->feature_scale[0] = 4.0f;
+  d->feature_scale[1] = 12.0f;
+  d->feature_scale[2] = 25.0f;
 }
 
 
@@ -867,13 +816,16 @@ void commit_params(dt_iop_module_t *self,
   // Copy per-scale params and compute derived values
   for(int s = 0; s < N_SCALES; s++)
   {
-    d->scales[s].detail_scale = p->detail_scale[s];
+    // UI parameter is given in percentage of detail strength, where 100% means no change 
+    // and 0% means that detail is removed (multiplier 0). Internal math is a multiplier of relative detail EV
+    // so that 100% means no change, 200% means double the detail, 50% means half the detail, 
+    d->scales[s].detail_boost = p->detail_boost[s] / 100.0f;
 
-    // UI blending param is the square root of the actual blending parameter
+    // UI feature_scale param is the square root of the actual feature_scale parameter
     // to make it more sensitive to small values that represent the most important value domain.
-    // UI parameter is given in percentage of maximum blending value.
-    // The actual blending parameter represents the fraction of the largest image dimension.
-    d->scales[s].blending = p->blending[s] * p->blending[s] / 10000.0f;
+    // UI parameter is given in percentage of maximum feature_scale value.
+    // The actual feature_scale parameter represents the fraction of the largest image dimension.
+    d->scales[s].feature_scale = p->feature_scale[s] * p->feature_scale[s] / 10000.0f;
 
     // UI guided filter feathering param increases edge taping
     // but actual regularization behaves inversely
@@ -960,7 +912,7 @@ void gui_changed(dt_iop_module_t *self,
   // Check per-scale widgets
   for(int s = 0; s < N_SCALES && !invalidate; s++)
   {
-    if(w == g->blending[s] || w == g->feathering[s])
+    if(w == g->feature_scale[s] || w == g->feathering[s])
     {
       invalidate = TRUE;
     }
@@ -991,7 +943,7 @@ static void show_mask_callback(GtkWidget *togglebutton,
   // If blend module is displaying mask, don't display here
   if(self->request_mask_display)
   {
-    dt_control_log(_("cannot display masks when the blending mask is displayed"));
+    dt_control_log(_("cannot display masks when the feature_scale mask is displayed"));
     for(int s = 0; s < N_SCALES; s++)
       gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_mask[s]), FALSE);
     g->mask_display_scale = -1;
@@ -1093,26 +1045,27 @@ static void create_scale_section(dt_iop_module_t *self,
 
   // Detail boost slider
   char param_name[64];
-  snprintf(param_name, sizeof(param_name), "detail_scale[%d]", scale_idx);
-  g->detail_scale[scale_idx] = dt_bauhaus_slider_from_params(self, param_name);
-  dt_bauhaus_slider_set_soft_range(g->detail_scale[scale_idx], 0.25, 3.0);
-  dt_bauhaus_slider_set_digits(g->detail_scale[scale_idx], 2);
-  dt_bauhaus_widget_set_label(g->detail_scale[scale_idx], NULL, _("detail boost"));
+  snprintf(param_name, sizeof(param_name), "detail_boost[%d]", scale_idx);
+  g->detail_boost[scale_idx] = dt_bauhaus_slider_from_params(self, param_name);
+  dt_bauhaus_slider_set_soft_range(g->detail_boost[scale_idx], 0.0, 300.0);
+  dt_bauhaus_slider_set_format(g->detail_boost[scale_idx], "%");
+  dt_bauhaus_slider_set_digits(g->detail_boost[scale_idx], 2);
+  dt_bauhaus_widget_set_label(g->detail_boost[scale_idx], NULL, _("detail strength"));
   gtk_widget_set_tooltip_text
-    (g->detail_scale[scale_idx],
-     _("amount of local contrast enhancement for this scale\n"
-       "1.0 = no change (scale inactive)\n"
-       "> 1.0 = boost local contrast\n"
-       "< 1.0 = reduce local contrast"));
+    (g->detail_boost[scale_idx],
+     _("amount of local contrast for this scale\n"
+       "100% = no change\n"
+       "> 100% = increase local contrast\n"
+       "< 100% = decrease local contrast"));
 
   // Feature scale slider
-  snprintf(param_name, sizeof(param_name), "blending[%d]", scale_idx);
-  g->blending[scale_idx] = dt_bauhaus_slider_from_params(self, param_name);
-  dt_bauhaus_slider_set_soft_range(g->blending[scale_idx], 0.1, 100.0);
-  dt_bauhaus_slider_set_format(g->blending[scale_idx], "%");
-  dt_bauhaus_widget_set_label(g->blending[scale_idx], NULL, _("feature scale"));
+  snprintf(param_name, sizeof(param_name), "feature_scale[%d]", scale_idx);
+  g->feature_scale[scale_idx] = dt_bauhaus_slider_from_params(self, param_name);
+  dt_bauhaus_slider_set_soft_range(g->feature_scale[scale_idx], 0.1, 100.0);
+  dt_bauhaus_slider_set_format(g->feature_scale[scale_idx], "%");
+  dt_bauhaus_widget_set_label(g->feature_scale[scale_idx], NULL, _("feature scale"));
   gtk_widget_set_tooltip_text
-    (g->blending[scale_idx],
+    (g->feature_scale[scale_idx],
      _("size of the smoothing area as percentage of image size\n"
        "larger = affects broader features\n"
        "smaller = affects finer details"));

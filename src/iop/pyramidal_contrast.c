@@ -35,7 +35,8 @@
  *
  * The module should be placed early in the pipe (before color profile)
  * as it operates on scene-linear RGB data.
- * A Modifier
+ * 
+ * A Modifier : Nom provisoir en ligne 1981 et 1982
  ***/
 
 
@@ -1402,6 +1403,7 @@ void init(dt_iop_module_t *self)
     d->exp_feathering[i] = 5.0f;
   }
 
+  d->exp_detail_boost[1] = 150.0f;
   d->exp_feature_scale[0] = 4.0f;
   d->exp_feature_scale[1] = 12.0f;
   d->exp_feature_scale[2] = 25.0f;
@@ -1977,8 +1979,8 @@ void gui_init(dt_iop_module_t *self)
   dt_action_define_iop(self, NULL, N_("mode"), GTK_WIDGET(g->notebook), &notebook_def);
   dt_gui_box_add(self->widget, GTK_WIDGET(g->notebook));
 
-  g->global_box = dt_ui_notebook_page(g->notebook, _("global"), _("global contrast settings"));
-  g->expert_box = dt_ui_notebook_page(g->notebook, _("expert"), _("expert contrast settings"));
+  g->global_box = dt_ui_notebook_page(g->notebook, _("pyramidal"), _("global contrast settings"));
+  g->expert_box = dt_ui_notebook_page(g->notebook, _("scaled"), _("expert contrast settings"));
 
   g_signal_connect(G_OBJECT(g->notebook), "switch-page", G_CALLBACK(mode_tab_switch_callback), self);
 

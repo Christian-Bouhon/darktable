@@ -14,8 +14,13 @@
 
     You should have received a copy of the GNU General Public License
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
-*/
 
+ * This module provides dual local contrast enhancement modes:
+ * - GLOBAL : Pyramidal contrast: multi-scale enhancement with independent controls
+ * - EXPRT : Local RGB contrast: multi-scale enhancement with shared parameters
+ *
+ * Both operate in scene-referred linear RGB space and should be placed early in the pipe.
+    */
 /*** DOCUMENTATION
  *
  * This module performs local contrast enhancement in scene-referred linear RGB space.

@@ -98,14 +98,14 @@ typedef enum dt_iop_local_contrast_rgb_filter_t
 typedef struct dt_iop_local_contrast_rgb_params_t
 {
   // Per-scale parameters
-  float detail_boost[N_SCALES];   // $MIN: 0.0 $MAX: 500.0 $DEFAULT: 100.0 $DESCRIPTION: "detail boost"
-  float feature_scale[N_SCALES];       // $MIN: 0.01 $MAX: 100.0 $DEFAULT: 12.0 $DESCRIPTION: "feature scale"
-  float feathering[N_SCALES];     // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "edges refinement"
+  float exp_detail_boost[N_SCALES];   // $MIN: 0.0 $MAX: 500.0 $DEFAULT: 100.0 $DESCRIPTION: "detail boost"
+  float exp_feature_scale[N_SCALES];       // $MIN: 0.01 $MAX: 100.0 $DEFAULT: 12.0 $DESCRIPTION: "feature scale"
+  float exp_feathering[N_SCALES];     // $MIN: 0.01 $MAX: 10000.0 $DEFAULT: 5.0 $DESCRIPTION: "edges refinement"
 
   // Shared parameters
-  dt_iop_local_contrast_rgb_filter_t details; // $DEFAULT: DT_LC_EIGF $DESCRIPTION: "feature extractor"
-  dt_iop_luminance_mask_method_t method;      // $DEFAULT: DT_TONEEQ_NORM_2 $DESCRIPTION: "luminance estimator"
-  int iterations;                             // $MIN: 1 $MAX: 20 $DEFAULT: 1 $DESCRIPTION: "filter diffusion"
+  dt_iop_local_contrast_rgb_filter_t exp_details; // $DEFAULT: DT_LC_EIGF $DESCRIPTION: "feature extractor"
+  dt_iop_luminance_mask_method_t exp_method;      // $DEFAULT: DT_TONEEQ_NORM_2 $DESCRIPTION: "luminance estimator"
+  int exp_iterations;                             // $MIN: 1 $MAX: 20 $DEFAULT: 1 $DESCRIPTION: "filter diffusion"
 } dt_iop_local_contrast_rgb_params_t;
 
 
@@ -114,22 +114,22 @@ typedef struct dt_iop_local_contrast_rgb_params_t
  **/
 typedef struct dt_iop_local_contrast_rgb_scale_data_t
 {
-  float detail_boost;
-  float feature_scale;
-  float feathering;
-  int radius;    // derived from feature_scale and image size
+  float exp_detail_boost;
+  float exp_feature_scale;
+  float exp_feathering;
+  int exp_radius;    // derived from feature_scale and image size
 } dt_iop_local_contrast_rgb_scale_data_t;
 
 
 typedef struct dt_iop_local_contrast_rgb_data_t
 {
   // Per-scale data
-  dt_iop_local_contrast_rgb_scale_data_t scales[N_SCALES];
+  dt_iop_local_contrast_rgb_scale_data_t exp_scales[N_SCALES];
 
   // Shared data
-  int iterations;
-  dt_iop_luminance_mask_method_t method;
-  dt_iop_local_contrast_rgb_filter_t details;
+  int exp_iterations;
+  dt_iop_luminance_mask_method_t exp_method;
+  dt_iop_local_contrast_rgb_filter_t exp_details;
 } dt_iop_local_contrast_rgb_data_t;
 
 
@@ -142,37 +142,37 @@ typedef struct dt_iop_local_contrast_rgb_global_data_t
 typedef struct dt_iop_local_contrast_rgb_gui_data_t
 {
   // Flags: which scale's mask is displayed (-1 = none)
-  int mask_display_scale;
+  int exp_mask_display_scale;
 
   // Buffer dimensions
-  int buf_width;
-  int buf_height;
-  int pipe_order;
+  int exp_buf_width;
+  int exp_buf_height;
+  int exp_pipe_order;
 
   // Hash for cache invalidation
-  dt_hash_t ui_preview_hash;
-  dt_hash_t thumb_preview_hash;
-  size_t full_preview_buf_width, full_preview_buf_height;
-  size_t thumb_preview_buf_width, thumb_preview_buf_height;
+  dt_hash_t exp_ui_preview_hash;
+  dt_hash_t exp_thumb_preview_hash;
+  size_t exp_full_preview_buf_width, exp_full_preview_buf_height;
+  size_t exp_thumb_preview_buf_width, exp_thumb_preview_buf_height;
 
   // Cached luminance buffers
-  float *thumb_preview_buf_pixel;                    // pixel-wise luminance (no blur)
-  float *thumb_preview_buf_smoothed[N_SCALES];       // smoothed luminance per scale
-  float *full_preview_buf_pixel;
-  float *full_preview_buf_smoothed[N_SCALES];
+  float *exp_thumb_preview_buf_pixel;                    // pixel-wise luminance (no blur)
+  float *exp_thumb_preview_buf_smoothed[N_SCALES];       // smoothed luminance per scale
+  float *exp_full_preview_buf_pixel;
+  float *exp_full_preview_buf_smoothed[N_SCALES];
 
   // Cache validity
-  gboolean luminance_valid;
+  gboolean exp_luminance_valid;
 
   // Per-scale GTK widgets
-  GtkWidget *detail_boost[N_SCALES];
-  GtkWidget *feature_scale[N_SCALES];
-  GtkWidget *feathering[N_SCALES];
-  GtkWidget *show_mask[N_SCALES];
+  GtkWidget *exp_detail_boost[N_SCALES];
+  GtkWidget *exp_feature_scale[N_SCALES];
+  GtkWidget *exp_feathering[N_SCALES];
+  GtkWidget *exp_show_mask[N_SCALES];
 
   // Shared GTK widgets
-  GtkWidget *details;
-  GtkWidget *iterations;
+  GtkWidget *exp_details;
+  GtkWidget *exp_iterations;
 } dt_iop_local_contrast_rgb_gui_data_t;
 
 
@@ -218,7 +218,7 @@ dt_iop_colorspace_type_t default_colorspace(dt_iop_module_t *self,
  * Helper functions
  **/
 
-static void hash_set_get(const dt_hash_t *hash_in,
+static void exp_hash_set_get(const dt_hash_t *hash_in,
                          dt_hash_t *hash_out,
                          dt_pthread_mutex_t *lock)
 {
@@ -228,14 +228,14 @@ static void hash_set_get(const dt_hash_t *hash_in,
 }
 
 
-static void invalidate_luminance_cache(dt_iop_module_t *const self)
+static void exp_invalidate_luminance_cache(dt_iop_module_t *const self)
 {
   dt_iop_local_contrast_rgb_gui_data_t *const restrict g = self->gui_data;
 
   dt_iop_gui_enter_critical_section(self);
-  g->luminance_valid = FALSE;
-  g->thumb_preview_hash = DT_INVALID_HASH;
-  g->ui_preview_hash = DT_INVALID_HASH;
+  g->exp_luminance_valid = FALSE;
+  g->exp_thumb_preview_hash = DT_INVALID_HASH;
+  g->exp_ui_preview_hash = DT_INVALID_HASH;
   dt_iop_gui_leave_critical_section(self);
   dt_iop_refresh_all(self);
 }
@@ -244,11 +244,11 @@ static void invalidate_luminance_cache(dt_iop_module_t *const self)
 /**
  * Check if any scale is active (detail_boost != 1.0)
  **/
-static inline gboolean has_active_scales(const dt_iop_local_contrast_rgb_data_t *const d)
+static inline gboolean exp_has_active_scales(const dt_iop_local_contrast_rgb_data_t *const d)
 {
   for(int s = 0; s < N_SCALES; s++)
   {
-    if(d->scales[s].detail_boost != 1.0f) return TRUE;
+    if(d->exp_scales[s].exp_detail_boost != 1.0f) return TRUE;
   }
   return FALSE;
 }
@@ -257,7 +257,7 @@ static inline gboolean has_active_scales(const dt_iop_local_contrast_rgb_data_t 
 /**
  * Check if a specific scale is active
  **/
-static inline gboolean scale_is_active(const float detail_boost)
+static inline gboolean exp_scale_is_active(const float detail_boost)
 {
   return detail_boost != 1.0f;
 }
@@ -267,7 +267,7 @@ static inline gboolean scale_is_active(const float detail_boost)
  * Compute pixel-wise luminance mask (no blur)
  **/
 __DT_CLONE_TARGETS__
-static inline void compute_pixel_luminance_mask(const float *const restrict in,
+static inline void exp_compute_pixel_luminance_mask(const float *const restrict in,
                                                 float *const restrict luminance,
                                                 const size_t width,
                                                 const size_t height,
@@ -282,7 +282,7 @@ static inline void compute_pixel_luminance_mask(const float *const restrict in,
  * Compute smoothed luminance mask for a single scale
  **/
 __DT_CLONE_TARGETS__
-static inline void compute_smoothed_luminance_for_scale(
+static inline void exp_compute_smoothed_luminance_for_scale(
     const float *const restrict in,
     float *const restrict luminance,
     const size_t width,
@@ -301,7 +301,7 @@ static inline void compute_smoothed_luminance_for_scale(
     case(DT_LC_AVG_GUIDED):
     {
       fast_surface_blur(luminance, width, height,
-                        scale_data->radius, scale_data->feathering, iterations,
+                        scale_data->exp_radius, scale_data->exp_feathering, iterations,
                         DT_GF_BLENDING_GEOMEAN, 1.0f, 0.0f,
                         exp2f(-14.0f), 4.0f);
       break;
@@ -310,7 +310,7 @@ static inline void compute_smoothed_luminance_for_scale(
     case(DT_LC_GUIDED):
     {
       fast_surface_blur(luminance, width, height,
-                        scale_data->radius, scale_data->feathering, iterations,
+                        scale_data->exp_radius, scale_data->exp_feathering, iterations,
                         DT_GF_BLENDING_LINEAR, 1.0f, 0.0f,
                         exp2f(-14.0f), 4.0f);
       break;
@@ -319,7 +319,7 @@ static inline void compute_smoothed_luminance_for_scale(
     case(DT_LC_AVG_EIGF):
     {
       fast_eigf_surface_blur(luminance, width, height,
-                             scale_data->radius, scale_data->feathering, iterations,
+                             scale_data->exp_radius, scale_data->exp_feathering, iterations,
                              DT_GF_BLENDING_GEOMEAN, 1.0f,
                              0.0f, exp2f(-14.0f), 4.0f);
       break;
@@ -328,7 +328,7 @@ static inline void compute_smoothed_luminance_for_scale(
     case(DT_LC_EIGF):
     {
       fast_eigf_surface_blur(luminance, width, height,
-                             scale_data->radius, scale_data->feathering, iterations,
+                             scale_data->exp_radius, scale_data->exp_feathering, iterations,
                              DT_GF_BLENDING_LINEAR, 1.0f,
                              0.0f, exp2f(-14.0f), 4.0f);
       break;
@@ -348,7 +348,7 @@ static inline void compute_smoothed_luminance_for_scale(
  * allows the effects to combine additively in log space.
  **/
 __DT_CLONE_TARGETS__
-static inline void apply_multiscale_local_contrast(
+static inline void exp_apply_multiscale_local_contrast(
     const float *const restrict in,
     const float *const restrict luminance_pixel,
     float *const restrict *const restrict luminance_smoothed,
@@ -366,8 +366,8 @@ static inline void apply_multiscale_local_contrast(
 
   for(int s = 0; s < N_SCALES; s++)
   {
-    detail_boosts[s] = d->scales[s].detail_boost;
-    active[s] = scale_is_active(detail_boosts[s]);
+    detail_boosts[s] = d->exp_scales[s].exp_detail_boost;
+    active[s] = exp_scale_is_active(detail_boosts[s]);
     if(active[s]) n_active++;
   }
 
@@ -420,7 +420,7 @@ static inline void apply_multiscale_local_contrast(
  * - > 0.5 = pixel brighter than neighborhood
  **/
 __DT_CLONE_TARGETS__
-static inline void display_detail_mask_for_scale(
+static inline void exp_display_detail_mask_for_scale(
     const float *const restrict luminance_pixel,
     const float *const restrict luminance_smoothed,
     float *const restrict out,
@@ -452,7 +452,7 @@ static inline void display_detail_mask_for_scale(
 /**
  * Allocate or reallocate smoothed buffers for all scales
  **/
-static inline void alloc_smoothed_buffers(float **buffers,
+static inline void exp_alloc_smoothed_buffers(float **buffers,
                                           const size_t num_elem)
 {
   for(int s = 0; s < N_SCALES; s++)
@@ -466,7 +466,7 @@ static inline void alloc_smoothed_buffers(float **buffers,
 /**
  * Free smoothed buffers for all scales
  **/
-static inline void free_smoothed_buffers(float **buffers)
+static inline void exp_free_smoothed_buffers(float **buffers)
 {
   for(int s = 0; s < N_SCALES; s++)
   {
@@ -479,7 +479,7 @@ static inline void free_smoothed_buffers(float **buffers)
 /**
  * Check if all smoothed buffers are allocated
  **/
-static inline gboolean smoothed_buffers_valid(float **buffers)
+static inline gboolean exp_smoothed_buffers_valid(float **buffers)
 {
   for(int s = 0; s < N_SCALES; s++)
   {
@@ -493,7 +493,7 @@ static inline gboolean smoothed_buffers_valid(float **buffers)
  * Main processing function
  **/
 __DT_CLONE_TARGETS__
-static void local_contrast_process(dt_iop_module_t *self,
+static void exp_process(dt_iop_module_t *self,
                                    dt_dev_pixelpipe_iop_t *piece,
                                    const void *const restrict ivoid,
                                    void *const restrict ovoid,
@@ -521,7 +521,7 @@ static void local_contrast_process(dt_iop_module_t *self,
   if(piece->colors != 4) return;
 
   // Fast path: if no scales are active, just copy
-  if(!has_active_scales(d) && (!g || g->mask_display_scale == -1))
+  if(!exp_has_active_scales(d) && (!g || g->exp_mask_display_scale == -1))
   {
     dt_iop_image_copy_by_size(out, in, width, height, 4);
     return;
@@ -533,73 +533,73 @@ static void local_contrast_process(dt_iop_module_t *self,
   if(self->dev->gui_attached)
   {
     // If the module instance has changed order in the pipe, invalidate caches
-    if(g->pipe_order != piece->module->iop_order)
+    if(g->exp_pipe_order != piece->module->iop_order)
     {
       dt_iop_gui_enter_critical_section(self);
-      g->ui_preview_hash = DT_INVALID_HASH;
-      g->thumb_preview_hash = DT_INVALID_HASH;
-      g->pipe_order = piece->module->iop_order;
-      g->luminance_valid = FALSE;
+      g->exp_ui_preview_hash = DT_INVALID_HASH;
+      g->exp_thumb_preview_hash = DT_INVALID_HASH;
+      g->exp_pipe_order = piece->module->iop_order;
+      g->exp_luminance_valid = FALSE;
       dt_iop_gui_leave_critical_section(self);
     }
 
     if(piece->pipe->type & DT_DEV_PIXELPIPE_FULL)
     {
       // Re-allocate buffers if size changed
-      if(g->full_preview_buf_width != width || g->full_preview_buf_height != height)
+      if(g->exp_full_preview_buf_width != width || g->exp_full_preview_buf_height != height)
       {
-        dt_free_align(g->full_preview_buf_pixel);
-        g->full_preview_buf_pixel = dt_alloc_align_float(num_elem);
-        alloc_smoothed_buffers(g->full_preview_buf_smoothed, num_elem);
-        g->full_preview_buf_width = width;
-        g->full_preview_buf_height = height;
+        dt_free_align(g->exp_full_preview_buf_pixel);
+        g->exp_full_preview_buf_pixel = dt_alloc_align_float(num_elem);
+        exp_alloc_smoothed_buffers(g->exp_full_preview_buf_smoothed, num_elem);
+        g->exp_full_preview_buf_width = width;
+        g->exp_full_preview_buf_height = height;
       }
 
-      luminance_pixel = g->full_preview_buf_pixel;
+      luminance_pixel = g->exp_full_preview_buf_pixel;
       for(int s = 0; s < N_SCALES; s++)
-        luminance_smoothed[s] = g->full_preview_buf_smoothed[s];
+        luminance_smoothed[s] = g->exp_full_preview_buf_smoothed[s];
       cached = TRUE;
     }
     else if(piece->pipe->type & DT_DEV_PIXELPIPE_PREVIEW)
     {
       dt_iop_gui_enter_critical_section(self);
-      if(g->thumb_preview_buf_width != width || g->thumb_preview_buf_height != height)
+      if(g->exp_thumb_preview_buf_width != width || g->exp_thumb_preview_buf_height != height)
       {
-        dt_free_align(g->thumb_preview_buf_pixel);
-        g->thumb_preview_buf_pixel = dt_alloc_align_float(num_elem);
-        alloc_smoothed_buffers(g->thumb_preview_buf_smoothed, num_elem);
-        g->thumb_preview_buf_width = width;
-        g->thumb_preview_buf_height = height;
-        g->luminance_valid = FALSE;
+        dt_free_align(g->exp_thumb_preview_buf_pixel);
+        g->exp_thumb_preview_buf_pixel = dt_alloc_align_float(num_elem);
+        exp_alloc_smoothed_buffers(g->exp_thumb_preview_buf_smoothed, num_elem);
+        g->exp_thumb_preview_buf_width = width;
+        g->exp_thumb_preview_buf_height = height;
+        g->exp_luminance_valid = FALSE;
       }
 
-      luminance_pixel = g->thumb_preview_buf_pixel;
+      luminance_pixel = g->exp_thumb_preview_buf_pixel;
       for(int s = 0; s < N_SCALES; s++)
-        luminance_smoothed[s] = g->thumb_preview_buf_smoothed[s];
+        luminance_smoothed[s] = g->exp_thumb_preview_buf_smoothed[s];
       cached = TRUE;
       dt_iop_gui_leave_critical_section(self);
     }
     else
     {
       luminance_pixel = dt_alloc_align_float(num_elem);
-      alloc_smoothed_buffers(luminance_smoothed, num_elem);
+      exp_alloc_smoothed_buffers(luminance_smoothed, num_elem);
     }
   }
   else
   {
     // No interactive editing: allocate local temp buffers
     luminance_pixel = dt_alloc_align_float(num_elem);
-    alloc_smoothed_buffers(luminance_smoothed, num_elem);
+    exp_alloc_smoothed_buffers(luminance_smoothed, num_elem);
   }
 
   // Check buffer allocation
-  if(!luminance_pixel || !smoothed_buffers_valid(luminance_smoothed))
+  if(!luminance_pixel || !exp_smoothed_buffers_valid(luminance_smoothed))
   {
     dt_control_log(_("local contrast failed to allocate memory, check your RAM settings"));
     if(!cached)
     {
       dt_free_align(luminance_pixel);
-      free_smoothed_buffers(luminance_smoothed);
+      exp_free_smoothed_buffers(luminance_smoothed);
     }
     return;
   }
@@ -610,63 +610,63 @@ static void local_contrast_process(dt_iop_module_t *self,
     if(piece->pipe->type & DT_DEV_PIXELPIPE_FULL)
     {
       dt_hash_t saved_hash;
-      hash_set_get(&g->ui_preview_hash, &saved_hash, &self->gui_lock);
+      exp_hash_set_get(&g->exp_ui_preview_hash, &saved_hash, &self->gui_lock);
 
       dt_iop_gui_enter_critical_section(self);
-      const gboolean luminance_valid = g->luminance_valid;
+      const gboolean luminance_valid = g->exp_luminance_valid;
       dt_iop_gui_leave_critical_section(self);
 
       if(hash != saved_hash || !luminance_valid)
       {
         // Compute pixel luminance once
-        compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
+        exp_compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->exp_method);
 
         // Compute smoothed luminance for each active scale
         for(int s = 0; s < N_SCALES; s++)
         {
-          if(scale_is_active(d->scales[s].detail_boost) || (g && g->mask_display_scale == s))
+          if(exp_scale_is_active(d->exp_scales[s].exp_detail_boost) || (g && g->exp_mask_display_scale == s))
           {
-            compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
+            exp_compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                                  width, height,
-                                                 &d->scales[s],
-                                                 d->details, d->iterations,
-                                                 d->method);
+                                                 &d->exp_scales[s],
+                                                 d->exp_details, d->exp_iterations,
+                                                 d->exp_method);
           }
         }
-        hash_set_get(&hash, &g->ui_preview_hash, &self->gui_lock);
+        exp_hash_set_get(&hash, &g->exp_ui_preview_hash, &self->gui_lock);
       }
     }
     else if(piece->pipe->type & DT_DEV_PIXELPIPE_PREVIEW)
     {
       dt_hash_t saved_hash;
-      hash_set_get(&g->thumb_preview_hash, &saved_hash, &self->gui_lock);
+      exp_hash_set_get(&g->exp_thumb_preview_hash, &saved_hash, &self->gui_lock);
 
       dt_iop_gui_enter_critical_section(self);
-      const gboolean luminance_valid = g->luminance_valid;
+      const gboolean luminance_valid = g->exp_luminance_valid;
       dt_iop_gui_leave_critical_section(self);
 
       if(saved_hash != hash || !luminance_valid)
       {
         dt_iop_gui_enter_critical_section(self);
-        g->thumb_preview_hash = hash;
+        g->exp_thumb_preview_hash = hash;
 
         // Compute pixel luminance once
-        compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
+        exp_compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->exp_method);
 
         // Compute smoothed luminance for each active scale
         for(int s = 0; s < N_SCALES; s++)
         {
-          if(scale_is_active(d->scales[s].detail_boost) || (g && g->mask_display_scale == s))
+          if(exp_scale_is_active(d->exp_scales[s].exp_detail_boost) || (g && g->exp_mask_display_scale == s))
           {
-            compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
+            exp_compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                                  width, height,
-                                                 &d->scales[s],
-                                                 d->details, d->iterations,
-                                                 d->method);
+                                                 &d->exp_scales[s],
+                                                 d->exp_details, d->exp_iterations,
+                                                 d->exp_method);
           }
         }
 
-        g->luminance_valid = TRUE;
+        g->exp_luminance_valid = TRUE;
         dt_iop_gui_leave_critical_section(self);
         dt_dev_pixelpipe_cache_invalidate_later(piece->pipe, self->iop_order);
       }
@@ -674,16 +674,16 @@ static void local_contrast_process(dt_iop_module_t *self,
     else
     {
       // Non-cached pipe: compute everything
-      compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
+      exp_compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->exp_method);
       for(int s = 0; s < N_SCALES; s++)
       {
-        if(scale_is_active(d->scales[s].detail_boost))
+        if(exp_scale_is_active(d->exp_scales[s].exp_detail_boost))
         {
-          compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
+          exp_compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                                width, height,
-                                               &d->scales[s],
-                                               d->details, d->iterations,
-                                               d->method);
+                                               &d->exp_scales[s],
+                                               d->exp_details, d->exp_iterations,
+                                               d->exp_method);
         }
       }
     }
@@ -691,16 +691,16 @@ static void local_contrast_process(dt_iop_module_t *self,
   else
   {
     // Non-GUI: compute everything
-    compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->method);
+    exp_compute_pixel_luminance_mask(in, luminance_pixel, width, height, d->exp_method);
     for(int s = 0; s < N_SCALES; s++)
     {
-      if(scale_is_active(d->scales[s].detail_boost) || (g && g->mask_display_scale == s))
+      if(exp_scale_is_active(d->exp_scales[s].exp_detail_boost) || (g && g->exp_mask_display_scale == s))
       {
-        compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
+        exp_compute_smoothed_luminance_for_scale(in, luminance_smoothed[s],
                                              width, height,
-                                             &d->scales[s],
-                                             d->details, d->iterations,
-                                             d->method);
+                                             &d->exp_scales[s],
+                                             d->exp_details, d->exp_iterations,
+                                             d->exp_method);
       }
     }
   }
@@ -708,31 +708,31 @@ static void local_contrast_process(dt_iop_module_t *self,
   // Display output
   if(self->dev->gui_attached && (piece->pipe->type & DT_DEV_PIXELPIPE_FULL))
   {
-    const int display_scale = g->mask_display_scale;
+    const int display_scale = g->exp_mask_display_scale;
     if(display_scale >= 0 && display_scale < N_SCALES
- // && scale_is_active(d->scales[display_scale].detail_boost)
+ // && exp_scale_is_active(d->exp_scales[display_scale].exp_detail_boost)
        && luminance_smoothed[display_scale])
     {
-      display_detail_mask_for_scale(luminance_pixel, luminance_smoothed[display_scale],
+      exp_display_detail_mask_for_scale(luminance_pixel, luminance_smoothed[display_scale],
                                     out, width, height);
       piece->pipe->mask_display = DT_DEV_PIXELPIPE_DISPLAY_PASSTHRU;
     }
     else
     {
-      apply_multiscale_local_contrast(in, luminance_pixel, luminance_smoothed,
+      exp_apply_multiscale_local_contrast(in, luminance_pixel, luminance_smoothed,
                                       out, width, height, d);
     }
   }
   else
   {
-    apply_multiscale_local_contrast(in, luminance_pixel, luminance_smoothed,
+    exp_apply_multiscale_local_contrast(in, luminance_pixel, luminance_smoothed,
                                     out, width, height, d);
   }
 
   if(!cached)
   {
     dt_free_align(luminance_pixel);
-    free_smoothed_buffers(luminance_smoothed);
+    exp_free_smoothed_buffers(luminance_smoothed);
   }
 }
 
@@ -744,7 +744,7 @@ void process(dt_iop_module_t *self,
              const dt_iop_roi_t *const roi_in,
              const dt_iop_roi_t *const roi_out)
 {
-  local_contrast_process(self, piece, ivoid, ovoid, roi_in, roi_out);
+  exp_process(self, piece, ivoid, ovoid, roi_in, roi_out);
 }
 
 
@@ -760,9 +760,9 @@ void modify_roi_in(dt_iop_module_t *self,
 
   for(int s = 0; s < N_SCALES; s++)
   {
-    const float diameter = d->scales[s].feature_scale * max_size * roi_in->scale;
+    const float diameter = d->exp_scales[s].exp_feature_scale * max_size * roi_in->scale;
     const int radius = (int)((diameter - 1.0f) / 2.0f);
-    d->scales[s].radius = radius;
+    d->exp_scales[s].exp_radius = radius;
   }
 }
 
@@ -790,13 +790,13 @@ void reload_defaults(dt_iop_module_t *self)
   // Other scales remain at 100% (no effect)
   for(int s = 0; s < N_SCALES; s++)
     if(s != 1)
-      d->detail_boost[s] = 100.0f;
+      d->exp_detail_boost[s] = 100.0f;
     else
-      d->detail_boost[s] = 150.0f;
+      d->exp_detail_boost[s] = 150.0f;
 
-  d->feature_scale[0] = 4.0f;
-  d->feature_scale[1] = 12.0f;
-  d->feature_scale[2] = 25.0f;
+  d->exp_feature_scale[0] = 4.0f;
+  d->exp_feature_scale[1] = 12.0f;
+  d->exp_feature_scale[2] = 25.0f;
 }
 
 
@@ -809,9 +809,9 @@ void commit_params(dt_iop_module_t *self,
   dt_iop_local_contrast_rgb_data_t *d = piece->data;
 
   // Copy shared params
-  d->method = p->method;
-  d->details = p->details;
-  d->iterations = p->iterations;
+  d->exp_method = p->exp_method;
+  d->exp_details = p->exp_details;
+  d->exp_iterations = p->exp_iterations;
 
   // Copy per-scale params and compute derived values
   for(int s = 0; s < N_SCALES; s++)
@@ -819,17 +819,17 @@ void commit_params(dt_iop_module_t *self,
     // UI parameter is given in percentage of detail strength, where 100% means no change 
     // and 0% means that detail is removed (multiplier 0). Internal math is a multiplier of relative detail EV
     // so that 100% means no change, 200% means double the detail, 50% means half the detail, 
-    d->scales[s].detail_boost = p->detail_boost[s] / 100.0f;
+    d->exp_scales[s].exp_detail_boost = p->exp_detail_boost[s] / 100.0f;
 
     // UI feature_scale param is the square root of the actual feature_scale parameter
     // to make it more sensitive to small values that represent the most important value domain.
     // UI parameter is given in percentage of maximum feature_scale value.
     // The actual feature_scale parameter represents the fraction of the largest image dimension.
-    d->scales[s].feature_scale = p->feature_scale[s] * p->feature_scale[s] / 10000.0f;
+    d->exp_scales[s].exp_feature_scale = p->exp_feature_scale[s] * p->exp_feature_scale[s] / 10000.0f;
 
     // UI guided filter feathering param increases edge taping
     // but actual regularization behaves inversely
-    d->scales[s].feathering = 1.0f / p->feathering[s];
+    d->exp_scales[s].exp_feathering = 1.0f / p->exp_feathering[s];
   }
 }
 
@@ -851,45 +851,55 @@ void cleanup_pipe(dt_iop_module_t *self,
 }
 
 
-static void gui_cache_init(dt_iop_module_t *self)
+static void exp_gui_cache_init(dt_iop_module_t *self)
 {
   dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
   if(g == NULL) return;
 
   dt_iop_gui_enter_critical_section(self);
-  g->ui_preview_hash = DT_INVALID_HASH;
-  g->thumb_preview_hash = DT_INVALID_HASH;
-  g->mask_display_scale = -1;  // no mask displayed
-  g->luminance_valid = FALSE;
+  g->exp_ui_preview_hash = DT_INVALID_HASH;
+  g->exp_thumb_preview_hash = DT_INVALID_HASH;
+  g->exp_mask_display_scale = -1;  // no mask displayed
+  g->exp_luminance_valid = FALSE;
 
-  g->full_preview_buf_pixel = NULL;
+  g->exp_full_preview_buf_pixel = NULL;
   for(int s = 0; s < N_SCALES; s++)
-    g->full_preview_buf_smoothed[s] = NULL;
-  g->full_preview_buf_width = 0;
-  g->full_preview_buf_height = 0;
+    g->exp_full_preview_buf_smoothed[s] = NULL;
+  g->exp_full_preview_buf_width = 0;
+  g->exp_full_preview_buf_height = 0;
 
-  g->thumb_preview_buf_pixel = NULL;
+  g->exp_thumb_preview_buf_pixel = NULL;
   for(int s = 0; s < N_SCALES; s++)
-    g->thumb_preview_buf_smoothed[s] = NULL;
-  g->thumb_preview_buf_width = 0;
-  g->thumb_preview_buf_height = 0;
+    g->exp_thumb_preview_buf_smoothed[s] = NULL;
+  g->exp_thumb_preview_buf_width = 0;
+  g->exp_thumb_preview_buf_height = 0;
 
-  g->pipe_order = 0;
+  g->exp_pipe_order = 0;
   dt_iop_gui_leave_critical_section(self);
 }
+static void exp_invalidate_luminance_cache(dt_iop_module_t *const self)
+{
+  dt_iop_pyramidal_contrast_gui_data_t *const restrict g = self->gui_data;
 
+  dt_iop_gui_enter_critical_section(self);
+  g->exp_luminance_valid = FALSE;
+  g->exp_thumb_preview_hash = DT_INVALID_HASH;
+  g->exp_ui_preview_hash = DT_INVALID_HASH;
+  dt_iop_gui_leave_critical_section(self);
+  dt_iop_refresh_all(self);
+}
 
 void gui_update(dt_iop_module_t *self)
 {
   dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
 
-  invalidate_luminance_cache(self);
+  exp_invalidate_luminance_cache(self);
 
   // Update mask toggle buttons
   for(int s = 0; s < N_SCALES; s++)
   {
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_mask[s]),
-                                 g->mask_display_scale == s);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->exp_show_mask[s]),
+                                 g->exp_mask_display_scale == s);
   }
 }
 
@@ -904,7 +914,7 @@ void gui_changed(dt_iop_module_t *self,
   gboolean invalidate = FALSE;
 
   // Check shared widgets
-  if(w == g->details || w == g->iterations)
+  if(w == g->exp_details || w == g->exp_iterations)
   {
     invalidate = TRUE;
   }
@@ -912,7 +922,7 @@ void gui_changed(dt_iop_module_t *self,
   // Check per-scale widgets
   for(int s = 0; s < N_SCALES && !invalidate; s++)
   {
-    if(w == g->feature_scale[s] || w == g->feathering[s])
+    if(w == g->exp_feature_scale[s] || w == g->exp_feathering[s])
     {
       invalidate = TRUE;
     }
@@ -920,7 +930,7 @@ void gui_changed(dt_iop_module_t *self,
 
   if(invalidate)
   {
-    invalidate_luminance_cache(self);
+    exp_invalidate_luminance_cache(self);
   }
 }
 
@@ -929,7 +939,7 @@ void gui_changed(dt_iop_module_t *self,
  * Callback for mask display toggle buttons.
  * Ensures only one mask can be displayed at a time.
  **/
-static void show_mask_callback(GtkWidget *togglebutton,
+static void exp_show_mask_callback(GtkWidget *togglebutton,
                                GdkEventButton *event,
                                dt_iop_module_t *self)
 {
@@ -945,8 +955,8 @@ static void show_mask_callback(GtkWidget *togglebutton,
   {
     dt_control_log(_("cannot display masks when the feature_scale mask is displayed"));
     for(int s = 0; s < N_SCALES; s++)
-      gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_mask[s]), FALSE);
-    g->mask_display_scale = -1;
+      gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->exp_show_mask[s]), FALSE);
+    g->exp_mask_display_scale = -1;
     return;
   }
 
@@ -954,7 +964,7 @@ static void show_mask_callback(GtkWidget *togglebutton,
   int clicked_scale = -1;
   for(int s = 0; s < N_SCALES; s++)
   {
-    if(togglebutton == g->show_mask[s])
+    if(togglebutton == g->exp_show_mask[s])
     {
       clicked_scale = s;
       break;
@@ -962,23 +972,23 @@ static void show_mask_callback(GtkWidget *togglebutton,
   }
 
   // Toggle: if same scale was active, turn off; otherwise switch to new scale
-  if(g->mask_display_scale == clicked_scale)
+  if(g->exp_mask_display_scale == clicked_scale)
   {
-    g->mask_display_scale = -1;  // turn off
+    g->exp_mask_display_scale = -1;  // turn off
   }
   else
   {
-    g->mask_display_scale = clicked_scale;  // switch to new
+    g->exp_mask_display_scale = clicked_scale;  // switch to new
   }
 
   // Update all toggle buttons
   for(int s = 0; s < N_SCALES; s++)
   {
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_mask[s]),
-                                 g->mask_display_scale == s);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->exp_show_mask[s]),
+                                 g->exp_mask_display_scale == s);
   }
 
-  invalidate_luminance_cache(self);
+  exp_invalidate_luminance_cache(self);
 }
 
 
@@ -991,7 +1001,7 @@ static void _develop_ui_pipe_started_callback(gpointer instance,
   if(!self->expanded || !self->enabled)
   {
     dt_iop_gui_enter_critical_section(self);
-    g->mask_display_scale = -1;
+    g->exp_mask_display_scale = -1;
     dt_iop_gui_leave_critical_section(self);
   }
 
@@ -999,8 +1009,8 @@ static void _develop_ui_pipe_started_callback(gpointer instance,
   dt_iop_gui_enter_critical_section(self);
   for(int s = 0; s < N_SCALES; s++)
   {
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_mask[s]),
-                                 g->mask_display_scale == s);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->exp_show_mask[s]),
+                                 g->exp_mask_display_scale == s);
   }
   dt_iop_gui_leave_critical_section(self);
   --darktable.gui->reset;
@@ -1032,7 +1042,7 @@ void gui_reset(dt_iop_module_t *self)
 /**
  * Create GUI widgets for a single scale section
  **/
-static void create_scale_section(dt_iop_module_t *self,
+static void exp_create_scale_section(dt_iop_module_t *self,
                                  dt_iop_local_contrast_rgb_gui_data_t *g,
                                  const int scale_idx)
 {
@@ -1045,54 +1055,54 @@ static void create_scale_section(dt_iop_module_t *self,
 
   // Detail boost slider
   char param_name[64];
-  snprintf(param_name, sizeof(param_name), "detail_boost[%d]", scale_idx);
-  g->detail_boost[scale_idx] = dt_bauhaus_slider_from_params(self, param_name);
-  dt_bauhaus_slider_set_soft_range(g->detail_boost[scale_idx], 0.0, 300.0);
-  dt_bauhaus_slider_set_format(g->detail_boost[scale_idx], "%");
-  dt_bauhaus_slider_set_digits(g->detail_boost[scale_idx], 2);
-  dt_bauhaus_widget_set_label(g->detail_boost[scale_idx], NULL, _("detail strength"));
+  snprintf(param_name, sizeof(param_name), "exp_detail_boost[%d]", scale_idx);
+  g->exp_detail_boost[scale_idx] = dt_bauhaus_slider_from_params(self, param_name);
+  dt_bauhaus_slider_set_soft_range(g->exp_detail_boost[scale_idx], 0.0, 300.0);
+  dt_bauhaus_slider_set_format(g->exp_detail_boost[scale_idx], "%");
+  dt_bauhaus_slider_set_digits(g->exp_detail_boost[scale_idx], 2);
+  dt_bauhaus_widget_set_label(g->exp_detail_boost[scale_idx], NULL, _("detail strength"));
   gtk_widget_set_tooltip_text
-    (g->detail_boost[scale_idx],
+    (g->exp_detail_boost[scale_idx],
      _("amount of local contrast for this scale\n"
        "100% = no change\n"
        "> 100% = increase local contrast\n"
        "< 100% = decrease local contrast"));
 
   // Feature scale slider
-  snprintf(param_name, sizeof(param_name), "feature_scale[%d]", scale_idx);
-  g->feature_scale[scale_idx] = dt_bauhaus_slider_from_params(self, param_name);
-  dt_bauhaus_slider_set_soft_range(g->feature_scale[scale_idx], 0.1, 100.0);
-  dt_bauhaus_slider_set_format(g->feature_scale[scale_idx], "%");
-  dt_bauhaus_widget_set_label(g->feature_scale[scale_idx], NULL, _("feature scale"));
+  snprintf(param_name, sizeof(param_name), "exp_feature_scale[%d]", scale_idx);
+  g->exp_feature_scale[scale_idx] = dt_bauhaus_slider_from_params(self, param_name);
+  dt_bauhaus_slider_set_soft_range(g->exp_feature_scale[scale_idx], 0.1, 100.0);
+  dt_bauhaus_slider_set_format(g->exp_feature_scale[scale_idx], "%");
+  dt_bauhaus_widget_set_label(g->exp_feature_scale[scale_idx], NULL, _("feature scale"));
   gtk_widget_set_tooltip_text
-    (g->feature_scale[scale_idx],
+    (g->exp_feature_scale[scale_idx],
      _("size of the smoothing area as percentage of image size\n"
        "larger = affects broader features\n"
        "smaller = affects finer details"));
 
   // Edge refinement slider
-  snprintf(param_name, sizeof(param_name), "feathering[%d]", scale_idx);
-  g->feathering[scale_idx] = dt_bauhaus_slider_from_params(self, param_name);
-  dt_bauhaus_slider_set_soft_range(g->feathering[scale_idx], 0.1, 50.0);
-  dt_bauhaus_widget_set_label(g->feathering[scale_idx], NULL, _("edges refinement"));
+  snprintf(param_name, sizeof(param_name), "exp_feathering[%d]", scale_idx);
+  g->exp_feathering[scale_idx] = dt_bauhaus_slider_from_params(self, param_name);
+  dt_bauhaus_slider_set_soft_range(g->exp_feathering[scale_idx], 0.1, 50.0);
+  dt_bauhaus_widget_set_label(g->exp_feathering[scale_idx], NULL, _("edges refinement"));
   gtk_widget_set_tooltip_text
-    (g->feathering[scale_idx],
+    (g->exp_feathering[scale_idx],
      _("edge sensitivity of the filter\n"
        "higher = better edge preservation\n"
        "lower = smoother transitions, but may lead to halos around edges"));
 
   // Mask display toggle
-  g->show_mask[scale_idx] = dt_iop_togglebutton_new
+  g->exp_show_mask[scale_idx] = dt_iop_togglebutton_new
     (self, NULL,
-     N_("display detail mask"), NULL, G_CALLBACK(show_mask_callback),
+     N_("display detail mask"), NULL, G_CALLBACK(exp_show_mask_callback),
      FALSE, 0, 0, dtgtk_cairo_paint_showmask, NULL);
-  dt_gui_add_class(g->show_mask[scale_idx], "dt_transparent_background");
-  dtgtk_togglebutton_set_paint(DTGTK_TOGGLEBUTTON(g->show_mask[scale_idx]),
+  dt_gui_add_class(g->exp_show_mask[scale_idx], "dt_transparent_background");
+  dtgtk_togglebutton_set_paint(DTGTK_TOGGLEBUTTON(g->exp_show_mask[scale_idx]),
                                dtgtk_cairo_paint_showmask, 0, NULL);
-  dt_gui_add_class(g->show_mask[scale_idx], "dt_bauhaus_alignment");
+  dt_gui_add_class(g->exp_show_mask[scale_idx], "dt_bauhaus_alignment");
 
   GtkWidget *hbox = dt_gui_hbox(dt_gui_expand(dt_ui_label_new(_("display detail mask"))),
-                                g->show_mask[scale_idx]);
+                                g->exp_show_mask[scale_idx]);
   dt_gui_box_add(self->widget, hbox);
 }
 
@@ -1101,7 +1111,7 @@ void gui_init(dt_iop_module_t *self)
 {
   dt_iop_local_contrast_rgb_gui_data_t *g = IOP_GUI_ALLOC(local_contrast_rgb);
 
-  gui_cache_init(self);
+  exp_gui_cache_init(self);
 
   // Main container
   self->widget = dt_gui_vbox();
@@ -1109,7 +1119,7 @@ void gui_init(dt_iop_module_t *self)
   // Create GUI for each scale
   for(int s = 0; s < N_SCALES; s++)
   {
-    create_scale_section(self, g, s);
+    exp_create_scale_section(self, g, s);
   }
 
   // Masking section (shared parameters)
@@ -1117,19 +1127,19 @@ void gui_init(dt_iop_module_t *self)
   dt_gui_box_add(self->widget, dt_ui_section_label_new(C_("section", "masking")));
 
   // Feature extractor
-  g->details = dt_bauhaus_combobox_from_params(self, N_("details"));
+  g->exp_details = dt_bauhaus_combobox_from_params(self, "exp_details");
   gtk_widget_set_tooltip_text
-    (g->details,
+    (g->exp_details,
      _("edge-aware filter used to smooth the luminance mask\n"
        "'guided filter' is good for general use\n"
        "'EIGF' (exposure-independent guided filter) treats shadows and highlights equally\n"
        "'averaged' variants blend with unfiltered for softer effect"));
 
   // Filter diffusion
-  g->iterations = dt_bauhaus_slider_from_params(self, "iterations");
-  dt_bauhaus_slider_set_soft_max(g->iterations, 5);
+  g->exp_iterations = dt_bauhaus_slider_from_params(self, "exp_iterations");
+  dt_bauhaus_slider_set_soft_max(g->exp_iterations, 5);
   gtk_widget_set_tooltip_text
-    (g->iterations,
+    (g->exp_iterations,
      _("number of filter passes\n"
        "more iterations = smoother result but slower"));
 
@@ -1144,10 +1154,10 @@ void gui_cleanup(dt_iop_module_t *self)
 {
   dt_iop_local_contrast_rgb_gui_data_t *g = self->gui_data;
 
-  dt_free_align(g->thumb_preview_buf_pixel);
-  free_smoothed_buffers(g->thumb_preview_buf_smoothed);
-  dt_free_align(g->full_preview_buf_pixel);
-  free_smoothed_buffers(g->full_preview_buf_smoothed);
+  dt_free_align(g->exp_thumb_preview_buf_pixel);
+  exp_free_smoothed_buffers(g->exp_thumb_preview_buf_smoothed);
+  dt_free_align(g->exp_full_preview_buf_pixel);
+  exp_free_smoothed_buffers(g->exp_full_preview_buf_smoothed);
 }
 
 

@@ -36,9 +36,10 @@
  * The module should be placed early in the pipe (before color profile)
  * as it operates on scene-linear RGB data.
  * 
- * A Modifier : Nom provisoir en ligne 1981 et 1982
+ * To ensure long-term maintainability and absolute code clarity, parameters are divided into two logical “namespaces”:
+ *  pyr_ = pyramidal & exp_ = expert “per-scale”
+ * Edit tab name: line 1981 "pyramidal" and 1982 "per-scale"; module line 286 "per-scale"
  ***/
-
 
 #include "common/extra_optimizations.h"
 
@@ -104,8 +105,8 @@ typedef enum dt_iop_pyramidal_contrast_expert_filter_t
 
 typedef enum dt_iop_pyramidal_contrast_mode_t
 {
-  DT_PYR_MODE_GLOBAL = 0, // $DESCRIPTION: "global"
-  DT_PYR_MODE_EXPERT = 1  // $DESCRIPTION: "expert"
+  DT_PYR_MODE_GLOBAL = 0, // $DESCRIPTION: "pyramidal"
+  DT_PYR_MODE_EXPERT = 1  // $DESCRIPTION: "per-scale"
 } dt_iop_pyramidal_contrast_mode_t;
 
 #define N_SCALES 3
@@ -143,6 +144,9 @@ typedef struct dt_iop_pyramidal_contrast_params_t
   dt_iop_pyramidal_contrast_filter_t pyr_details; // $DEFAULT: DT_PYR_EIGF $DESCRIPTION: "feature extractor"
   dt_iop_luminance_mask_method_t pyr_method;      // $DEFAULT: DT_TONEEQ_NORM_2 $DESCRIPTION: "luminance estimator"
   int pyr_iterations;       // $MIN: 1 $MAX: 20 $DEFAULT: 1 $DESCRIPTION: "filter diffusion"
+
+  float noise_threshold;    // $MIN: 0.0 $MAX: 0.2 $DEFAULT: 0.005 $DESCRIPTION: "noise threshold"
+  float csf_adaptation;     // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 1.0 $DESCRIPTION: "visual adaptation"
 
   // Expert mode params
   float exp_detail_boost[N_SCALES];   // $MIN: 0.0 $MAX: 500.0 $DEFAULT: 100.0 $DESCRIPTION: "detail boost"
@@ -184,6 +188,9 @@ typedef struct dt_iop_pyramidal_contrast_data_t
   int pyr_iterations;
   dt_iop_luminance_mask_method_t pyr_method;
   dt_iop_pyramidal_contrast_filter_t pyr_details;
+
+  float noise_threshold;
+  float csf_adaptation;
 
   dt_iop_pyramidal_contrast_scale_data_t exp_scales[N_SCALES];
   int exp_iterations;
@@ -243,6 +250,8 @@ typedef struct dt_iop_pyramidal_contrast_gui_data_t
 
   // GTK widgets
   GtkWidget *pyr_broad_scale, *pyr_medium_scale, *pyr_detail_scale, *pyr_fine_scale, *pyr_micro_scale, *pyr_global_scale;
+  GtkWidget *pyr_noise_threshold;
+  GtkWidget *pyr_csf_adaptation;
   GtkWidget *pyr_blending;
   GtkWidget *pyr_feathering;
   dt_gui_collapsible_section_t pyr_advanced_expander;
@@ -252,7 +261,7 @@ typedef struct dt_iop_pyramidal_contrast_gui_data_t
   GtkWidget *pyr_f_view_broad, *pyr_f_view_medium, *pyr_f_view_detail, *pyr_f_view_fine, *pyr_f_view_micro;
 
   // Expert mode widgets
-  GtkNotebook *notebook;
+  GtkWidget *mode_combo;
   GtkWidget *global_box;
   GtkWidget *expert_box;
 
@@ -275,9 +284,10 @@ typedef struct dt_iop_pyramidal_contrast_gui_data_t
   GtkWidget *exp_show_mask[N_SCALES];
   GtkWidget *exp_details;
   GtkWidget *exp_iterations;
+  GtkWidget *exp_csf_adaptation;
+  GtkWidget *exp_noise_threshold;
   dt_gui_collapsible_section_t exp_scale_expander[N_SCALES];
 } dt_iop_pyramidal_contrast_gui_data_t;
-static void mode_tab_switch_callback(GtkNotebook *notebook, GtkWidget *page, guint page_num, dt_iop_module_t *self);
 
 static void exp_invalidate_luminance_cache(dt_iop_module_t *const self);
 static void pyr_invalidate_luminance_cache(dt_iop_module_t *const self);
@@ -464,55 +474,65 @@ static inline void pyr_apply_local_contrast(const float *const restrict in,
   DT_OMP_FOR()
   for(size_t k = 0; k < npixels; k++)
   {
-    // Detail in log space (EV): how much brighter/darker is this pixel
-    // compared to its local neighborhood
-    // detail = log2(pixel_lum / smoothed_lum) = log2(pixel_lum) - log2(smoothed_lum)
     const float lum_pixel = fmaxf(luminance_pixel[k], MIN_FLOAT);
     const float lum_smoothed = fmaxf(luminance_smoothed[k], MIN_FLOAT);
     const float detail_ev = log2f(lum_pixel / lum_smoothed);
 
-    // Scale the detail: detail_scale = 1.0 means no change
-    // > 1.0 boosts local contrast, < 1.0 reduces it
-    const float scaled_detail_ev = d->pyr_detail_scale * detail_ev;
+    const float protection = fminf(fmaxf(lum_pixel / fmaxf(d->noise_threshold, 1e-6f), 0.0f), 1.0f);
 
-    // The correction is the difference between scaled and original detail
-    float correction_ev = scaled_detail_ev - detail_ev;
+    // CSF coefficients for each scale
+    const float csf_coeffs[6] = {0.45f, 1.0f, 0.8f, 0.5f, 0.5f, 1.0f}; // micro, fine, detail, medium, broad, global
+
+    // Apply CSF adaptation and noise protection to detail scale
+    const float csf_weight_detail = 1.0f + (csf_coeffs[2] - 1.0f) * d->csf_adaptation;
+    const float gain_detail = d->pyr_detail_scale;
+    const float gain_effectif_detail = 1.0f + (gain_detail - 1.0f) * csf_weight_detail;
+    float correction_ev = (gain_effectif_detail - 1.0f) * detail_ev;
 
     if(luminance_smoothed_broad)
     {
-      const float lum_smoothed_broad = fmaxf(luminance_smoothed_broad[k], MIN_FLOAT);
-      const float detail_ev_broad = log2f(lum_pixel / lum_smoothed_broad);
-      const float scaled_detail_ev_broad = d->pyr_broad_scale * detail_ev_broad;
-      correction_ev += scaled_detail_ev_broad - detail_ev_broad;
+      const float detail_ev_broad = log2f(lum_pixel / lum_smoothed);
+      const float csf_weight_broad = 1.0f + (csf_coeffs[4] - 1.0f) * d->csf_adaptation;
+      const float gain_broad = d->pyr_broad_scale;
+      const float gain_effectif_broad = 1.0f + (gain_broad - 1.0f) * csf_weight_broad;
+      correction_ev += (gain_effectif_broad - 1.0f) * detail_ev_broad;
     }
 
     if(luminance_smoothed_medium)
     {
-      const float lum_smoothed_medium = fmaxf(luminance_smoothed_medium[k], MIN_FLOAT);
-      const float detail_ev_medium = log2f(lum_pixel / lum_smoothed_medium);
-      const float scaled_detail_ev_medium = d->pyr_medium_scale * detail_ev_medium;
-      correction_ev += scaled_detail_ev_medium - detail_ev_medium;
+      const float detail_ev_medium = log2f(lum_pixel / lum_smoothed);
+      const float csf_weight_medium = 1.0f + (csf_coeffs[3] - 1.0f) * d->csf_adaptation;
+      const float gain_medium = d->pyr_medium_scale;
+      const float gain_effectif_medium = 1.0f + (gain_medium - 1.0f) * csf_weight_medium;
+      correction_ev += (gain_effectif_medium - 1.0f) * detail_ev_medium;
     }
 
     if(luminance_smoothed_fine)
     {
-      const float lum_smoothed_fine = fmaxf(luminance_smoothed_fine[k], MIN_FLOAT);
-      const float detail_ev_fine = log2f(lum_pixel / lum_smoothed_fine);
-      const float scaled_detail_ev_fine = d->pyr_fine_scale * detail_ev_fine;
-      correction_ev += scaled_detail_ev_fine - detail_ev_fine;
+      const float detail_ev_fine = log2f(lum_pixel / lum_smoothed);
+      const float csf_weight_fine = 1.0f + (csf_coeffs[1] - 1.0f) * d->csf_adaptation;
+      const float gain_fine = d->pyr_fine_scale;
+      const float gain_effectif_fine = 1.0f + (gain_fine - 1.0f) * csf_weight_fine;
+      correction_ev += (gain_effectif_fine - 1.0f) * detail_ev_fine;
     }
 
     if(luminance_smoothed_micro)
     {
-      const float lum_smoothed_micro = fmaxf(luminance_smoothed_micro[k], MIN_FLOAT);
-      const float detail_ev_micro = log2f(lum_pixel / lum_smoothed_micro);
-      const float scaled_detail_ev_micro = d->pyr_micro_scale * detail_ev_micro;
-      correction_ev += scaled_detail_ev_micro - detail_ev_micro;
+      const float detail_ev_micro = log2f(lum_pixel / lum_smoothed);
+      const float csf_weight_micro = 1.0f + (csf_coeffs[0] - 1.0f) * d->csf_adaptation;
+      const float gain_micro = d->pyr_micro_scale;
+      const float gain_effectif_micro = 1.0f + (gain_micro - 1.0f) * csf_weight_micro;
+      correction_ev += (gain_effectif_micro - 1.0f) * detail_ev_micro;
     }
 
     // Apply correction in linear space
-    // global_scale has the same range as detail_scale.
-    const float multiplier = exp2f(correction_ev) * powf(lum_smoothed / 0.1845f, d->pyr_global_scale) * 0.1845f / lum_smoothed;
+    const float csf_weight_global = 1.0f + (csf_coeffs[5] - 1.0f) * d->csf_adaptation;
+    const float gain_global = d->pyr_global_scale;
+    const float gain_effectif_global = 1.0f + (gain_global - 1.0f) * csf_weight_global;
+    const float ratio = lum_pixel / lum_smoothed;
+    const float local_exponent = correction_ev / log2f(ratio) * protection;
+    const float global_exponent = (gain_effectif_global - 1.0f) * protection;
+    const float multiplier = powf(ratio, local_exponent + global_exponent);
 
     for_each_channel(c)
       out[4 * k + c] = in[4 * k + c] * multiplier;
@@ -698,29 +718,27 @@ static inline void exp_apply_multiscale_local_contrast(
   for(size_t k = 0; k < npixels; k++)
   {
     const float lum_pixel = fmaxf(luminance_pixel[k], MIN_FLOAT);
-    float total_correction_ev = 0.0f;
+
+    // Noise protection: reduce gain in low light areas
+    const float protection = fminf(fmaxf(lum_pixel / fmaxf(d->noise_threshold, 1e-6f), 0.0f), 1.0f);
+
+    const float lum_smoothed_main = fmaxf(luminance_smoothed[0][k], MIN_FLOAT);
+    const float detail_ev = log2f(lum_pixel / lum_smoothed_main);
+
+    float correction_ev = 0.0f;
 
     // Sum correction contributions from all active scales
     for(int s = 0; s < N_SCALES; s++)
     {
       if(!active[s]) continue;
 
-      const float lum_smoothed = fmaxf(luminance_smoothed[s][k], MIN_FLOAT);
-
-      // Detail in log space (EV): how much brighter/darker is this pixel
-      // compared to its local neighborhood at this scale
-      const float detail_ev = log2f(lum_pixel / lum_smoothed);
-
-      // Scale the detail: detail_boost = 1.0 means no change
-      // > 1.0 boosts local contrast, < 1.0 reduces it
-      const float scaled_detail_ev = detail_boosts[s] * detail_ev;
-
-      // The correction is the difference between scaled and original detail
-      total_correction_ev += scaled_detail_ev - detail_ev;
+      const float gain_effectif = detail_boosts[s];
+      correction_ev += (gain_effectif - 1.0f) * detail_ev;
     }
 
-    // Apply combined correction in linear space
-    const float multiplier = exp2f(total_correction_ev);
+    const float ratio = lum_pixel / lum_smoothed_main;
+    const float total_exponent = correction_ev / log2f(ratio) * protection;
+    const float multiplier = powf(ratio, total_exponent);
 
     for_each_channel(c)
       out[4 * k + c] = in[4 * k + c] * multiplier;
@@ -1396,6 +1414,9 @@ void init(dt_iop_module_t *self)
   d->pyr_method = DT_TONEEQ_NORM_2;
   d->pyr_iterations = 1;
 
+  d->noise_threshold = 0.005f;
+  d->csf_adaptation = 1.0f;
+
   for(int i = 0; i < N_SCALES; i++)
   {
     d->exp_detail_boost[i] = 100.0f;
@@ -1403,10 +1424,10 @@ void init(dt_iop_module_t *self)
     d->exp_feathering[i] = 5.0f;
   }
 
-  d->exp_detail_boost[1] = 150.0f;
-  d->exp_feature_scale[0] = 4.0f;
+  d->exp_detail_boost[0] = 150.0f;
+  d->exp_feature_scale[0] = 12.0f;
   d->exp_feature_scale[1] = 12.0f;
-  d->exp_feature_scale[2] = 25.0f;
+  d->exp_feature_scale[2] = 12.0f;
 
   d->exp_details = DT_EXP_EIGF;
   d->exp_method = DT_TONEEQ_NORM_2;
@@ -1448,6 +1469,9 @@ void commit_params(dt_iop_module_t *self,
   d->pyr_medium_scale = p->pyr_medium_scale;
   d->pyr_broad_scale = p->pyr_broad_scale; 
   d->pyr_global_scale = p->pyr_global_scale;
+
+  d->noise_threshold = p->noise_threshold;
+  d->csf_adaptation = p->csf_adaptation;
 
   // UI blending param is the square root of the actual blending parameter
   // to make it more sensitive to small values that represent the most important value domain.
@@ -1697,6 +1721,7 @@ static void pyr_show_guiding_controls(const dt_iop_module_t *self)
 void gui_update(dt_iop_module_t *self)
 {
   dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
+  dt_iop_pyramidal_contrast_params_t *p = self->params;
 
   exp_invalidate_luminance_cache(self);
   pyr_show_guiding_controls(self);
@@ -1705,10 +1730,8 @@ void gui_update(dt_iop_module_t *self)
 
   dt_gui_update_collapsible_section(&g->pyr_advanced_expander);
 
-  dt_iop_pyramidal_contrast_params_t *p = self->params;
-  g_signal_handlers_block_by_func(g->notebook, mode_tab_switch_callback, self);
-  gtk_notebook_set_current_page(g->notebook, p->mode);
-  g_signal_handlers_unblock_by_func(g->notebook, mode_tab_switch_callback, self);
+  gtk_widget_set_visible(g->global_box, p->mode == DT_PYR_MODE_GLOBAL);
+  gtk_widget_set_visible(g->expert_box, p->mode == DT_PYR_MODE_EXPERT);
 }
 
 
@@ -1717,6 +1740,13 @@ void gui_changed(dt_iop_module_t *self,
                  void *previous)
 {
   const dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
+  const dt_iop_pyramidal_contrast_params_t *p = self->params;
+
+  if(w == g->mode_combo)
+  {
+    gtk_widget_set_visible(g->global_box, p->mode == DT_PYR_MODE_GLOBAL);
+    gtk_widget_set_visible(g->expert_box, p->mode == DT_PYR_MODE_EXPERT);
+  }
 
   if(w == g->pyr_blending || w == g->pyr_feathering
      || w == g->pyr_f_mult_micro || w == g->pyr_f_mult_fine || w == g->pyr_f_mult_detail
@@ -1887,8 +1917,8 @@ static void exp_create_scale_section(dt_iop_module_t *self,
   snprintf(key, sizeof(key), "plugins/darkroom/pyramidal_contrast/expanded_scale_%d", scale_idx + 1);
   dt_gui_new_collapsible_section(&g->exp_scale_expander[scale_idx], key, section_name, GTK_BOX(container), DT_ACTION(self));
 
-  // Set expanded state: scale 2 (index 1) open by default
-  if(scale_idx == 1)
+  // Set expanded state: scale 1 (index 0) open by default
+  if(scale_idx == 0)
     dtgtk_expander_set_expanded(DTGTK_EXPANDER(g->exp_scale_expander[scale_idx].expander), TRUE);
 
   // Switch self->widget to the section container
@@ -1905,10 +1935,7 @@ static void exp_create_scale_section(dt_iop_module_t *self,
   dt_bauhaus_widget_set_label(g->exp_detail_boost[scale_idx], NULL, _("detail strength"));
   gtk_widget_set_tooltip_text
     (g->exp_detail_boost[scale_idx],
-     _("amount of local contrast for this scale\n"
-       "100% = no change\n"
-       "> 100% = increase local contrast\n"
-       "< 100% = decrease local contrast"));
+     _("Adjust contrast enhancement for this specific spatial frequency scale."));
 
   // Feature scale slider
   snprintf(param_name, sizeof(param_name), "exp_feature_scale[%d]", scale_idx);
@@ -1920,7 +1947,11 @@ static void exp_create_scale_section(dt_iop_module_t *self,
     (g->exp_feature_scale[scale_idx],
      _("size of the smoothing area as percentage of image size\n"
        "larger = affects broader features\n"
-       "smaller = affects finer details"));
+       "smaller = affects finer details\n"
+       "Recommended values:\n"
+       "- micro, fine contrast: 2% to 7%\n"
+       "- local contrast: 10% to 14%\n"
+       "- broader, extended contrast: 20% to 50%"));
 
   // Edge refinement slider
   snprintf(param_name, sizeof(param_name), "exp_feathering[%d]", scale_idx);
@@ -1951,18 +1982,6 @@ static void exp_create_scale_section(dt_iop_module_t *self,
   self->widget = old_widget;
 }
 
-static void mode_tab_switch_callback(GtkNotebook *notebook,
-                                     GtkWidget *page,
-                                     guint page_num,
-                                     dt_iop_module_t *self)
-{
-  if(darktable.gui->reset) return;
-  dt_iop_pyramidal_contrast_params_t *p = self->params;
-  
-  p->mode = (dt_iop_pyramidal_contrast_mode_t)page_num;
-  dt_dev_add_history_item(darktable.develop, self, TRUE);
-}
-
 void gui_init(dt_iop_module_t *self)
 {
   dt_iop_pyramidal_contrast_gui_data_t *g = IOP_GUI_ALLOC(pyramidal_contrast);
@@ -1973,16 +1992,16 @@ void gui_init(dt_iop_module_t *self)
   // Main container
   self->widget = dt_gui_vbox();
   GtkWidget *root = self->widget;
-  
-  static dt_action_def_t notebook_def = { };
-  g->notebook = GTK_NOTEBOOK(dt_ui_notebook_new(&notebook_def));
-  dt_action_define_iop(self, NULL, N_("mode"), GTK_WIDGET(g->notebook), &notebook_def);
-  dt_gui_box_add(self->widget, GTK_WIDGET(g->notebook));
 
-  g->global_box = dt_ui_notebook_page(g->notebook, _("pyramidal"), _("global contrast settings"));
-  g->expert_box = dt_ui_notebook_page(g->notebook, _("scaled"), _("expert contrast settings"));
+  g->mode_combo = dt_bauhaus_combobox_from_params(self, "mode");
+  dt_gui_box_add(self->widget, g->mode_combo);
+  gtk_widget_set_margin_bottom(g->mode_combo, DT_PIXEL_APPLY_DPI(8)); 
+  dt_gui_box_add(self->widget, g->mode_combo);
 
-  g_signal_connect(G_OBJECT(g->notebook), "switch-page", G_CALLBACK(mode_tab_switch_callback), self);
+  g->global_box = dt_gui_vbox();
+  g->expert_box = dt_gui_vbox();
+  dt_gui_box_add(self->widget, g->global_box);
+  dt_gui_box_add(self->widget, g->expert_box);
 
   // --- Global Mode ---
   // Set target to global_box
@@ -1994,7 +2013,7 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_digits(g->pyr_micro_scale, 2);
   dt_bauhaus_slider_set_format(g->pyr_micro_scale, "%");
   dt_bauhaus_slider_set_factor(g->pyr_micro_scale, 100.0);
-  gtk_widget_set_tooltip_text(g->pyr_micro_scale, _("amount of micro contrast enhancement"));
+  gtk_widget_set_tooltip_text(g->pyr_micro_scale, _("Adjust contrast enhancement for this specific spatial frequency scale."));
   dt_bauhaus_widget_set_quad(g->pyr_micro_scale, self, dtgtk_cairo_paint_showmask, TRUE, pyr_quad_callback,
                              _("visualize micro contrast mask"));
 
@@ -2004,7 +2023,7 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_digits(g->pyr_fine_scale, 2);
   dt_bauhaus_slider_set_format(g->pyr_fine_scale, "%");
   dt_bauhaus_slider_set_factor(g->pyr_fine_scale, 100.0);
-  gtk_widget_set_tooltip_text(g->pyr_fine_scale, _("amount of fine contrast enhancement"));
+  gtk_widget_set_tooltip_text(g->pyr_fine_scale, _("Adjust contrast enhancement for this specific spatial frequency scale."));
   dt_bauhaus_widget_set_quad(g->pyr_fine_scale, self, dtgtk_cairo_paint_showmask, TRUE, pyr_quad_callback,
                              _("visualize fine contrast mask"));
 
@@ -2016,10 +2035,7 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_factor(g->pyr_detail_scale, 100.0);
   gtk_widget_set_tooltip_text
     (g->pyr_detail_scale,
-     _("amount of local contrast enhancement\n"
-       "1.0 = no change\n"
-       "> 1.0 = boost local contrast\n"
-       "< 1.0 = reduce local contrast"));
+     _("Adjust contrast enhancement for this specific spatial frequency scale."));
   dt_bauhaus_widget_set_quad(g->pyr_detail_scale, self, dtgtk_cairo_paint_showmask, TRUE, pyr_quad_callback,
                              _("visualize local contrast mask"));
 
@@ -2029,7 +2045,7 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_digits(g->pyr_medium_scale, 2);
   dt_bauhaus_slider_set_format(g->pyr_medium_scale, "%");
   dt_bauhaus_slider_set_factor(g->pyr_medium_scale, 100.0);
-  gtk_widget_set_tooltip_text(g->pyr_medium_scale, _("amount of broad contrast enhancement"));
+  gtk_widget_set_tooltip_text(g->pyr_medium_scale, _("Adjust contrast enhancement for this specific spatial frequency scale."));
   dt_bauhaus_widget_set_quad(g->pyr_medium_scale, self, dtgtk_cairo_paint_showmask, TRUE, pyr_quad_callback,
                              _("visualize broad contrast mask"));
 
@@ -2039,7 +2055,7 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_digits(g->pyr_broad_scale, 2);
   dt_bauhaus_slider_set_format(g->pyr_broad_scale, "%");
   dt_bauhaus_slider_set_factor(g->pyr_broad_scale, 100.0);
-  gtk_widget_set_tooltip_text(g->pyr_broad_scale, _("amount of extended contrast enhancement"));
+  gtk_widget_set_tooltip_text(g->pyr_broad_scale, _("Adjust contrast enhancement for this specific spatial frequency scale."));
   dt_bauhaus_widget_set_quad(g->pyr_broad_scale, self, dtgtk_cairo_paint_showmask, TRUE, pyr_quad_callback,
                              _("visualize extended contrast mask"));
 
@@ -2051,10 +2067,10 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_factor(g->pyr_global_scale, 100.0);
   gtk_widget_set_tooltip_text
     (g->pyr_global_scale,
-     _("amount of global contrast enhancement"));
+     _("Adjust contrast enhancement for this specific spatial frequency scale."));
 
   // Separator
-  GtkWidget *label = dt_ui_section_label_new(C_("section", "masking"));
+  GtkWidget *label = dt_ui_section_label_new(C_("section", "masking and noise protection"));
   gtk_widget_set_margin_top(label, DT_PIXEL_APPLY_DPI(10));
   dt_gui_box_add(g->global_box, label);
 
@@ -2070,7 +2086,22 @@ void gui_init(dt_iop_module_t *self)
 
   g->pyr_feathering = dt_bauhaus_slider_from_params(self, "pyr_feathering");
   dt_bauhaus_slider_set_soft_range(g->pyr_feathering, 0.1, 50.0);
-  gtk_widget_set_tooltip_text(g->pyr_feathering, _("edges refinement"));
+  gtk_widget_set_tooltip_text(g->pyr_feathering, _
+    ("edge sensitivity of the filter\n"
+       "higher = better edge preservation\n"
+       "lower = smoother transitions, but may lead to halos around edges")
+  );
+
+  // Noise threshold slider
+  g->pyr_noise_threshold = dt_bauhaus_slider_from_params(self, "noise_threshold");
+  dt_bauhaus_slider_set_soft_range(g->pyr_noise_threshold, 0.0, 0.2);
+  dt_bauhaus_slider_set_digits(g->pyr_noise_threshold, 4);
+  gtk_widget_set_tooltip_text(g->pyr_noise_threshold, _("Transition point for noise protection. Gradually reduces contrast in areas darker than this value to avoid amplifying sensor noise."));
+
+  g->pyr_csf_adaptation = dt_bauhaus_slider_from_params(self, "csf_adaptation");
+  dt_bauhaus_slider_set_soft_range(g->pyr_csf_adaptation, 0.0, 1.0);
+  dt_bauhaus_slider_set_digits(g->pyr_csf_adaptation, 2);
+  gtk_widget_set_tooltip_text(g->pyr_csf_adaptation, _("Weight the enhancement according to the Human Contrast Sensitivity Function (CSF). High values focus on details the eye is most sensitive to."));
 
   // Create section
   dt_gui_new_collapsible_section(&g->pyr_advanced_expander, "plugins/darkroom/pyramidal_contrast/expanded_advanced",
@@ -2103,7 +2134,7 @@ void gui_init(dt_iop_module_t *self)
   }
 
   // Masking section (shared parameters)
-  label = dt_ui_section_label_new(C_("section", "masking"));
+  label = dt_ui_section_label_new(C_("section", "masking and noise protection"));
   gtk_widget_set_margin_top(label, DT_PIXEL_APPLY_DPI(10));
   dt_gui_box_add(masking_container, label);
 
@@ -2111,6 +2142,18 @@ void gui_init(dt_iop_module_t *self)
   dt_gui_box_add(masking_container, g->exp_details);
   g->exp_iterations = dt_bauhaus_slider_from_params(self, "exp_iterations");
   dt_gui_box_add(masking_container, g->exp_iterations);
+
+  g->exp_noise_threshold = dt_bauhaus_slider_from_params(self, "noise_threshold");
+  dt_bauhaus_slider_set_soft_range(g->exp_noise_threshold, 0.0, 0.2);
+  dt_bauhaus_slider_set_digits(g->exp_noise_threshold, 4);
+  gtk_widget_set_tooltip_text(g->exp_noise_threshold, _("Transition point for noise protection. Gradually reduces contrast in areas darker than this value to avoid amplifying sensor noise."));
+  dt_gui_box_add(masking_container, g->exp_noise_threshold);
+
+  g->exp_csf_adaptation = dt_bauhaus_slider_from_params(self, "csf_adaptation");
+  dt_bauhaus_slider_set_soft_range(g->exp_csf_adaptation, 0.0, 1.0);
+  dt_bauhaus_slider_set_digits(g->exp_csf_adaptation, 2);
+  gtk_widget_set_tooltip_text(g->exp_csf_adaptation, _("Weight the enhancement according to the Human Contrast Sensitivity Function (CSF). High values focus on details the eye is most sensitive to."));
+  dt_gui_box_add(masking_container, g->exp_csf_adaptation);
 
   // Restore main widget
   self->widget = root;

@@ -1975,11 +1975,9 @@ void gui_init(dt_iop_module_t *self)
   g->mode_combo = dt_bauhaus_combobox_from_params(self, "mode");
   dt_gui_box_add(self->widget, g->mode_combo);
 
-  GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-  gtk_widget_set_visible(separator, TRUE);
-  gtk_widget_set_margin_top(separator, DT_PIXEL_APPLY_DPI(5));
-  gtk_widget_set_margin_bottom(separator, DT_PIXEL_APPLY_DPI(5));
-  dt_gui_box_add(self->widget, separator);
+  GtkWidget *section_sep = dt_ui_section_label_new(_("settings")); 
+  gtk_widget_set_margin_top(section_sep, DT_PIXEL_APPLY_DPI(10));
+  dt_gui_box_add(self->widget, section_sep);
 
   g->global_box = dt_gui_vbox();
   g->expert_box = dt_gui_vbox();

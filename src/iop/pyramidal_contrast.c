@@ -36,9 +36,10 @@
  * The module should be placed early in the pipe (before color profile)
  * as it operates on scene-linear RGB data.
  * 
- * A Modifier : Nom provisoir en ligne 1981 et 1982
+ * To ensure long-term maintainability and absolute code clarity, parameters are divided into two logical “namespaces”:
+ *  pyr_ = pyramidal & exp_ = expert “per-scale”
+ * Edit tab name: line 1981 "pyramidal" and 1982 "per-scale"; module line 286 "per-scale"
  ***/
-
 
 #include "common/extra_optimizations.h"
 
@@ -104,8 +105,8 @@ typedef enum dt_iop_pyramidal_contrast_expert_filter_t
 
 typedef enum dt_iop_pyramidal_contrast_mode_t
 {
-  DT_PYR_MODE_GLOBAL = 0, // $DESCRIPTION: "global"
-  DT_PYR_MODE_EXPERT = 1  // $DESCRIPTION: "expert"
+  DT_PYR_MODE_GLOBAL = 0, // $DESCRIPTION: "pyramidal"
+  DT_PYR_MODE_EXPERT = 1  // $DESCRIPTION: "per-scale"
 } dt_iop_pyramidal_contrast_mode_t;
 
 #define N_SCALES 3
@@ -252,7 +253,7 @@ typedef struct dt_iop_pyramidal_contrast_gui_data_t
   GtkWidget *pyr_f_view_broad, *pyr_f_view_medium, *pyr_f_view_detail, *pyr_f_view_fine, *pyr_f_view_micro;
 
   // Expert mode widgets
-  GtkNotebook *notebook;
+  GtkWidget *mode_combo;
   GtkWidget *global_box;
   GtkWidget *expert_box;
 
@@ -277,7 +278,6 @@ typedef struct dt_iop_pyramidal_contrast_gui_data_t
   GtkWidget *exp_iterations;
   dt_gui_collapsible_section_t exp_scale_expander[N_SCALES];
 } dt_iop_pyramidal_contrast_gui_data_t;
-static void mode_tab_switch_callback(GtkNotebook *notebook, GtkWidget *page, guint page_num, dt_iop_module_t *self);
 
 static void exp_invalidate_luminance_cache(dt_iop_module_t *const self);
 static void pyr_invalidate_luminance_cache(dt_iop_module_t *const self);
@@ -1403,10 +1403,10 @@ void init(dt_iop_module_t *self)
     d->exp_feathering[i] = 5.0f;
   }
 
-  d->exp_detail_boost[1] = 150.0f;
-  d->exp_feature_scale[0] = 4.0f;
+  d->exp_detail_boost[0] = 150.0f;
+  d->exp_feature_scale[0] = 12.0f;
   d->exp_feature_scale[1] = 12.0f;
-  d->exp_feature_scale[2] = 25.0f;
+  d->exp_feature_scale[2] = 12.0f;
 
   d->exp_details = DT_EXP_EIGF;
   d->exp_method = DT_TONEEQ_NORM_2;
@@ -1697,6 +1697,7 @@ static void pyr_show_guiding_controls(const dt_iop_module_t *self)
 void gui_update(dt_iop_module_t *self)
 {
   dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
+  dt_iop_pyramidal_contrast_params_t *p = self->params;
 
   exp_invalidate_luminance_cache(self);
   pyr_show_guiding_controls(self);
@@ -1705,10 +1706,8 @@ void gui_update(dt_iop_module_t *self)
 
   dt_gui_update_collapsible_section(&g->pyr_advanced_expander);
 
-  dt_iop_pyramidal_contrast_params_t *p = self->params;
-  g_signal_handlers_block_by_func(g->notebook, mode_tab_switch_callback, self);
-  gtk_notebook_set_current_page(g->notebook, p->mode);
-  g_signal_handlers_unblock_by_func(g->notebook, mode_tab_switch_callback, self);
+  gtk_widget_set_visible(g->global_box, p->mode == DT_PYR_MODE_GLOBAL);
+  gtk_widget_set_visible(g->expert_box, p->mode == DT_PYR_MODE_EXPERT);
 }
 
 
@@ -1717,6 +1716,13 @@ void gui_changed(dt_iop_module_t *self,
                  void *previous)
 {
   const dt_iop_pyramidal_contrast_gui_data_t *g = self->gui_data;
+  const dt_iop_pyramidal_contrast_params_t *p = self->params;
+
+  if(w == g->mode_combo)
+  {
+    gtk_widget_set_visible(g->global_box, p->mode == DT_PYR_MODE_GLOBAL);
+    gtk_widget_set_visible(g->expert_box, p->mode == DT_PYR_MODE_EXPERT);
+  }
 
   if(w == g->pyr_blending || w == g->pyr_feathering
      || w == g->pyr_f_mult_micro || w == g->pyr_f_mult_fine || w == g->pyr_f_mult_detail
@@ -1887,8 +1893,8 @@ static void exp_create_scale_section(dt_iop_module_t *self,
   snprintf(key, sizeof(key), "plugins/darkroom/pyramidal_contrast/expanded_scale_%d", scale_idx + 1);
   dt_gui_new_collapsible_section(&g->exp_scale_expander[scale_idx], key, section_name, GTK_BOX(container), DT_ACTION(self));
 
-  // Set expanded state: scale 2 (index 1) open by default
-  if(scale_idx == 1)
+  // Set expanded state: scale 1 (index 0) open by default
+  if(scale_idx == 0)
     dtgtk_expander_set_expanded(DTGTK_EXPANDER(g->exp_scale_expander[scale_idx].expander), TRUE);
 
   // Switch self->widget to the section container
@@ -1920,7 +1926,11 @@ static void exp_create_scale_section(dt_iop_module_t *self,
     (g->exp_feature_scale[scale_idx],
      _("size of the smoothing area as percentage of image size\n"
        "larger = affects broader features\n"
-       "smaller = affects finer details"));
+       "smaller = affects finer details/n"
+       "Recommended values:\n"
+       "- micro, fine contrast: 2% to 7%\n"
+       "- local contrast: 10% to 14%\n"
+       "- broader, extended contrast: 20% to 50%"));
 
   // Edge refinement slider
   snprintf(param_name, sizeof(param_name), "exp_feathering[%d]", scale_idx);
@@ -1951,18 +1961,6 @@ static void exp_create_scale_section(dt_iop_module_t *self,
   self->widget = old_widget;
 }
 
-static void mode_tab_switch_callback(GtkNotebook *notebook,
-                                     GtkWidget *page,
-                                     guint page_num,
-                                     dt_iop_module_t *self)
-{
-  if(darktable.gui->reset) return;
-  dt_iop_pyramidal_contrast_params_t *p = self->params;
-  
-  p->mode = (dt_iop_pyramidal_contrast_mode_t)page_num;
-  dt_dev_add_history_item(darktable.develop, self, TRUE);
-}
-
 void gui_init(dt_iop_module_t *self)
 {
   dt_iop_pyramidal_contrast_gui_data_t *g = IOP_GUI_ALLOC(pyramidal_contrast);
@@ -1973,16 +1971,20 @@ void gui_init(dt_iop_module_t *self)
   // Main container
   self->widget = dt_gui_vbox();
   GtkWidget *root = self->widget;
-  
-  static dt_action_def_t notebook_def = { };
-  g->notebook = GTK_NOTEBOOK(dt_ui_notebook_new(&notebook_def));
-  dt_action_define_iop(self, NULL, N_("mode"), GTK_WIDGET(g->notebook), &notebook_def);
-  dt_gui_box_add(self->widget, GTK_WIDGET(g->notebook));
 
-  g->global_box = dt_ui_notebook_page(g->notebook, _("pyramidal"), _("global contrast settings"));
-  g->expert_box = dt_ui_notebook_page(g->notebook, _("scaled"), _("expert contrast settings"));
+  g->mode_combo = dt_bauhaus_combobox_from_params(self, "mode");
+  dt_gui_box_add(self->widget, g->mode_combo);
 
-  g_signal_connect(G_OBJECT(g->notebook), "switch-page", G_CALLBACK(mode_tab_switch_callback), self);
+  GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+  gtk_widget_set_visible(separator, TRUE);
+  gtk_widget_set_margin_top(separator, DT_PIXEL_APPLY_DPI(5));
+  gtk_widget_set_margin_bottom(separator, DT_PIXEL_APPLY_DPI(5));
+  dt_gui_box_add(self->widget, separator);
+
+  g->global_box = dt_gui_vbox();
+  g->expert_box = dt_gui_vbox();
+  dt_gui_box_add(self->widget, g->global_box);
+  dt_gui_box_add(self->widget, g->expert_box);
 
   // --- Global Mode ---
   // Set target to global_box
@@ -2070,7 +2072,11 @@ void gui_init(dt_iop_module_t *self)
 
   g->pyr_feathering = dt_bauhaus_slider_from_params(self, "pyr_feathering");
   dt_bauhaus_slider_set_soft_range(g->pyr_feathering, 0.1, 50.0);
-  gtk_widget_set_tooltip_text(g->pyr_feathering, _("edges refinement"));
+  gtk_widget_set_tooltip_text(g->pyr_feathering, _
+    ("edge sensitivity of the filter\n"
+       "higher = better edge preservation\n"
+       "lower = smoother transitions, but may lead to halos around edges")
+  );
 
   // Create section
   dt_gui_new_collapsible_section(&g->pyr_advanced_expander, "plugins/darkroom/pyramidal_contrast/expanded_advanced",

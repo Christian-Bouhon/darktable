@@ -39,6 +39,10 @@
  * To ensure long-term maintainability and absolute code clarity, parameters are divided into two logical “namespaces”:
  *  pyr_ = pyramidal & exp_ = expert “per-scale”
  * Edit tab name: line 1981 "pyramidal" and 1982 "per-scale"; module line 286 "per-scale"
+ * Pour les valeur par défaut des nouveaux cureseurs denoise et csf  
+      d->noise_threshold = 0.005f;
+      d->csf_adaptation = 0.2f;
+ 
  ***/
 
 #include "common/extra_optimizations.h"
@@ -146,7 +150,7 @@ typedef struct dt_iop_pyramidal_contrast_params_t
   int pyr_iterations;       // $MIN: 1 $MAX: 20 $DEFAULT: 1 $DESCRIPTION: "filter diffusion"
 
   float noise_threshold;    // $MIN: 0.0 $MAX: 0.2 $DEFAULT: 0.005 $DESCRIPTION: "noise threshold"
-  float csf_adaptation;     // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 1.0 $DESCRIPTION: "visual adaptation"
+  float csf_adaptation;     // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 0.2 $DESCRIPTION: "visual adaptation (CSF)"
 
   // Expert mode params
   float exp_detail_boost[N_SCALES];   // $MIN: 0.0 $MAX: 500.0 $DEFAULT: 100.0 $DESCRIPTION: "detail boost"
@@ -1415,7 +1419,7 @@ void init(dt_iop_module_t *self)
   d->pyr_iterations = 1;
 
   d->noise_threshold = 0.005f;
-  d->csf_adaptation = 1.0f;
+  d->csf_adaptation = 0.2f;
 
   for(int i = 0; i < N_SCALES; i++)
   {
@@ -2094,10 +2098,13 @@ void gui_init(dt_iop_module_t *self)
 
   // Noise threshold slider
   g->pyr_noise_threshold = dt_bauhaus_slider_from_params(self, "noise_threshold");
-  dt_bauhaus_slider_set_soft_range(g->pyr_noise_threshold, 0.0, 0.2);
+  dt_bauhaus_slider_set_soft_range(g->pyr_noise_threshold, 0.0, 0.1);
+  dt_bauhaus_slider_set_hard_min(g->pyr_noise_threshold, 0.0);
+  dt_bauhaus_slider_set_hard_max(g->pyr_noise_threshold, 0.2);
+  
   dt_bauhaus_slider_set_digits(g->pyr_noise_threshold, 4);
-  gtk_widget_set_tooltip_text(g->pyr_noise_threshold, _("Transition point for noise protection. Gradually reduces contrast in areas darker than this value to avoid amplifying sensor noise."));
 
+  gtk_widget_set_tooltip_text(g->pyr_noise_threshold, _("Noise protection. Cursor limited to 0.1, keyboard entry up to 0.2."));
   g->pyr_csf_adaptation = dt_bauhaus_slider_from_params(self, "csf_adaptation");
   dt_bauhaus_slider_set_soft_range(g->pyr_csf_adaptation, 0.0, 1.0);
   dt_bauhaus_slider_set_digits(g->pyr_csf_adaptation, 2);
@@ -2143,10 +2150,15 @@ void gui_init(dt_iop_module_t *self)
   g->exp_iterations = dt_bauhaus_slider_from_params(self, "exp_iterations");
   dt_gui_box_add(masking_container, g->exp_iterations);
 
+  // Noise threshold slider (Expert)
   g->exp_noise_threshold = dt_bauhaus_slider_from_params(self, "noise_threshold");
-  dt_bauhaus_slider_set_soft_range(g->exp_noise_threshold, 0.0, 0.2);
+  dt_bauhaus_slider_set_soft_range(g->exp_noise_threshold, 0.0, 0.1);
+  dt_bauhaus_slider_set_hard_min(g->exp_noise_threshold, 0.0);
+  dt_bauhaus_slider_set_hard_max(g->exp_noise_threshold, 0.2);
+  
   dt_bauhaus_slider_set_digits(g->exp_noise_threshold, 4);
-  gtk_widget_set_tooltip_text(g->exp_noise_threshold, _("Transition point for noise protection. Gradually reduces contrast in areas darker than this value to avoid amplifying sensor noise."));
+
+  gtk_widget_set_tooltip_text(g->exp_noise_threshold, _("Noise protection. Cursor limited to 0.1, keyboard entry up to 0.2."));
   dt_gui_box_add(masking_container, g->exp_noise_threshold);
 
   g->exp_csf_adaptation = dt_bauhaus_slider_from_params(self, "csf_adaptation");
@@ -2163,7 +2175,6 @@ void gui_init(dt_iop_module_t *self)
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_UI_PIPE_FINISHED, _develop_ui_pipe_finished_callback);
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_HISTORY_CHANGE, _develop_ui_pipe_started_callback);
 }
-
 
 void gui_cleanup(dt_iop_module_t *self)
 {

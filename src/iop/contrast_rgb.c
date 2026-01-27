@@ -56,7 +56,6 @@
 #include "bauhaus/bauhaus.h"
 #include "common/darktable.h"
 #include "common/fast_guided_filter.h"
-#include "common/fast_pow.h"
 #include "common/eigf.h"
 #include "common/luminance_mask.h"
 #include "common/opencl.h"
@@ -539,7 +538,7 @@ static inline void pyr_apply_local_contrast(const float *const restrict in,
     const float local_exponent = gain_sum * protection;
     const float global_exponent = global_gain_factor * protection;
     const float exponent = local_exponent + global_exponent;
-    const float multiplier = (fabsf(exponent) < 1e-6f) ? 1.0f : dt_fast_powf(ratio, exponent);
+    const float multiplier = (fabsf(exponent) < 1e-6f) ? 1.0f : powf(ratio, exponent);
 
     for_each_channel(c)
       out[4 * k + c] = in[4 * k + c] * multiplier;
@@ -739,7 +738,7 @@ static inline void exp_apply_multiscale_local_contrast(
     const float lum_smoothed_main = fmaxf(luminance_smoothed[0][k], MIN_FLOAT);
     const float ratio = lum_pixel / lum_smoothed_main;
     const float total_exponent = correction_factor * protection;
-    const float multiplier = (fabsf(total_exponent) < 1e-6f) ? 1.0f : dt_fast_powf(ratio, total_exponent);
+    const float multiplier = (fabsf(total_exponent) < 1e-6f) ? 1.0f : powf(ratio, total_exponent);
 
     for_each_channel(c)
       out[4 * k + c] = in[4 * k + c] * multiplier;

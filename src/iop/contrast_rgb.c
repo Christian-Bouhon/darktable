@@ -534,11 +534,11 @@ static inline void pyr_apply_local_contrast(const float *const restrict in,
     const float protection = fminf(fmaxf(lum_pixel / fmaxf(d->noise_threshold, 1e-6f), 0.0f), 1.0f);
 
     // Apply correction in linear space
-    const float ratio = lum_pixel / lum_smoothed;
+    const float detail_ev = log2f(lum_pixel) - log2f(lum_smoothed);
     const float local_exponent = gain_sum * protection;
     const float global_exponent = global_gain_factor * protection;
     const float exponent = local_exponent + global_exponent;
-    const float multiplier = (fabsf(exponent) < 1e-6f) ? 1.0f : powf(ratio, exponent);
+    const float multiplier = exp2f(detail_ev * exponent);
 
     for_each_channel(c)
       out[4 * k + c] = in[4 * k + c] * multiplier;
@@ -736,9 +736,9 @@ static inline void exp_apply_multiscale_local_contrast(
     const float protection = fminf(fmaxf(lum_pixel / fmaxf(d->noise_threshold, 1e-6f), 0.0f), 1.0f);
 
     const float lum_smoothed_main = fmaxf(luminance_smoothed[0][k], MIN_FLOAT);
-    const float ratio = lum_pixel / lum_smoothed_main;
+    const float detail_ev = log2f(lum_pixel) - log2f(lum_smoothed_main);
     const float total_exponent = correction_factor * protection;
-    const float multiplier = (fabsf(total_exponent) < 1e-6f) ? 1.0f : powf(ratio, total_exponent);
+    const float multiplier = exp2f(detail_ev * total_exponent);
 
     for_each_channel(c)
       out[4 * k + c] = in[4 * k + c] * multiplier;

@@ -512,7 +512,8 @@ static inline void pyr_apply_local_contrast(const float *const restrict in,
 
     // Apply correction in linear space
     // global_scale has the same range as detail_scale.
-    const float multiplier = exp2f(correction_ev) * powf(lum_smoothed / 0.1845f, d->pyr_global_scale) * 0.1845f / lum_smoothed;
+    const float global_ev = log2f(lum_smoothed / 0.1845f);
+    const float multiplier = exp2f(correction_ev + global_ev * (d->pyr_global_scale - 1.0f));
 
     for_each_channel(c)
       out[4 * k + c] = in[4 * k + c] * multiplier;

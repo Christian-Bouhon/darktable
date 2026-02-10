@@ -2814,13 +2814,12 @@ static gboolean _area_button_release_callback(GtkWidget *widget,
   return FALSE;
 }
 
-static gboolean _area_size_callback(GtkWidget *widget,
-                                    GdkEventButton *event,
-                                    const dt_iop_module_t *self)
+static void _area_size_callback(GtkWidget *widget,
+                                GdkRectangle *allocation,
+                                const dt_iop_module_t *self)
 {
   dt_iop_colorequal_gui_data_t *g = self->gui_data;
   g->gradients_cached = FALSE;
-  return FALSE;
 }
 
 void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
@@ -3005,8 +3004,6 @@ void gui_init(dt_iop_module_t *self)
   static dt_action_def_t notebook_def = { };
   g->notebook = dt_ui_notebook_new(&notebook_def);
   dt_action_define_iop(self, NULL, N_("page"), GTK_WIDGET(g->notebook), &notebook_def);
-  g_signal_connect(G_OBJECT(g->notebook), "switch_page",
-                   G_CALLBACK(_channel_tabs_switch_callback), self);
 
   // graph
   g->area = GTK_DRAWING_AREA
@@ -3033,7 +3030,7 @@ void gui_init(dt_iop_module_t *self)
                    G_CALLBACK(_area_motion_notify_callback), self);
   g_signal_connect(G_OBJECT(g->area), "scroll-event",
                    G_CALLBACK(_area_scrolled_callback), self);
-  g_signal_connect(G_OBJECT(g->area), "size_allocate",
+  g_signal_connect(G_OBJECT(g->area), "size-allocate",
                    G_CALLBACK(_area_size_callback), self);
 
   GtkWidget *box = self->widget = dt_gui_vbox(g->notebook, g->area);
@@ -3193,6 +3190,9 @@ void gui_init(dt_iop_module_t *self)
   g->page_num = active_page;
 
   self->widget = GTK_WIDGET(box);
+
+  g_signal_connect(G_OBJECT(g->notebook), "switch_page",
+                   G_CALLBACK(_channel_tabs_switch_callback), self);
 }
 
 // clang-format off

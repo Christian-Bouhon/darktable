@@ -53,19 +53,37 @@ changes (where available).
 
 ## UI/UX Improvements
 
-- N/A
+- In the crop module, the crop aspect ratio is added to the dimensions
+  in the crop area preview.
 
 ## Performance Improvements
 
-- N/A
+- Increased performance for OpenCL guided filter by internal tiling.
 
 ## Other Changes
 
-- N/A
+- Enabled shortcuts for some existing buttons in duplicate manager,
+  snapshots, and AgX modules.
+
+- Added 2 apertures, f/0.95 and f/1.2, to the aperture section of the
+  presets dialogue.
+
+- Added Canon Automatic Lighting Optimizer support for CR3-format
+  images.
+
+- Added PNG support (8/16-bit) for external raster masks.
 
 ## Bug Fixes
 
-- N/A
+- Properly apply the iop-order when applying a style at export
+  time. This also fixes the style preview when flying over styles in
+  the style module.
+
+- If a tag category is marked as private, all tags and subcategories
+  under it are also treated as private.
+
+- Fix occasional geolocation assignment errors in darktable's locations
+  module involving polygon-shaped locations
 
 ## Lua
 
@@ -95,8 +113,9 @@ changes (where available).
   metadata fields unless the user selects all of the checkboxes in the
   export module's preference options.
 
-- Starting with release 5.4, Intel Macs and macOS versions older than 14.0
-  are no longer supported.
+- Starting with release 5.4, macOS versions older than 14.0 are no
+  longer supported on Apple Silicon Macs, nor older than macOS 15 on
+  Intel Macs.
 
 ## Changed Dependencies
 

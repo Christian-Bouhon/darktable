@@ -241,7 +241,7 @@ typedef struct dt_opencl_t
   int opencl_synchronization_timeout;
   dt_opencl_scheduling_profile_t scheduling_profile;
   uint32_t crc;
-  int mandatory[5];
+  gboolean mandatory[5];
   int *dev_priority_image;
   int *dev_priority_preview;
   int *dev_priority_preview2;
@@ -359,6 +359,12 @@ int dt_opencl_get_kernel_work_group_size(const int dev,
 /** wrap opencl single argument */
 #define CLARG(arg) CLWRAP(sizeof(arg), &arg)
 
+/** wrap inline parameters as compound literals (C99) used for #defines / constants ..
+  See https://en.cppreference.com/w/c/language/compound_literal.html
+*/
+#define CLARGINT(arg) CLWRAP(sizeof(int), &((int){arg}))
+#define CLARGFLOAT(arg) CLWRAP(sizeof(float), &((float){arg}))
+
 /** wrap opencl argument array */
 #define CLARRAY(num, arg) CLWRAP(num * sizeof(*arg), arg)
 
@@ -432,20 +438,6 @@ int dt_opencl_read_host_from_device_rowpitch(const int devid,
                                              const int height,
                                              const int rowpitch);
 
-int dt_opencl_read_host_from_device_non_blocking(const int devid,
-                                                 void *host,
-                                                 void *device,
-                                                 const int width,
-                                                 const int height,
-                                                 const int bpp);
-
-int dt_opencl_read_host_from_device_rowpitch_non_blocking(const int devid,
-                                                          void *host,
-                                                          void *device,
-                                                          const int width,
-                                                          const int height,
-                                                          const int rowpitch);
-
 int dt_opencl_read_host_from_device_raw(const int devid,
                                         void *host,
                                         void *device,
@@ -468,20 +460,6 @@ int dt_opencl_write_host_to_device_rowpitch(const int devid,
                                             const int height,
                                             const int rowpitch);
 
-int dt_opencl_write_host_to_device_non_blocking(const int devid,
-                                                void *host,
-                                                void *device,
-                                                const int width,
-                                                const int height,
-                                                const int bpp);
-
-int dt_opencl_write_host_to_device_rowpitch_non_blocking(const int devid,
-                                                         void *host,
-                                                         void *device,
-                                                         const int width,
-                                                         const int height,
-                                                         const int rowpitch);
-
 int dt_opencl_write_host_to_device_raw(const int devid,
                                        void *host,
                                        void *device,
@@ -495,13 +473,6 @@ void *dt_opencl_copy_host_to_device(const int devid,
                                     const int width,
                                     const int height,
                                     const int bpp);
-
-void *dt_opencl_copy_host_to_device_rowpitch(const int devid,
-                                             void *host,
-                                             const int width,
-                                             const int height,
-                                             const int bpp,
-                                             const int rowpitch);
 
 void *dt_opencl_copy_host_to_device_constant(const int devid,
                                              const size_t size,
@@ -518,13 +489,6 @@ void *dt_opencl_alloc_device(const int devid,
                              const int width,
                              const int height,
                              const int bpp);
-
-void *dt_opencl_alloc_device_use_host_pointer(const int devid,
-                                              const int width,
-                                              const int height,
-                                              const int bpp,
-                                              const int rowpitch,
-                                              void *host);
 
 int dt_opencl_enqueue_copy_image_to_buffer(const int devid,
                                            cl_mem src_image,
@@ -637,10 +601,11 @@ cl_int dt_opencl_events_flush(const int devid,
                               const gboolean reset);
 
 /** utility function to calculate optimal work group dimensions for a
- * given kernel */
-gboolean dt_opencl_local_buffer_opt(const int devid,
-                               const int kernel,
-                               dt_opencl_local_buffer_t *factors);
+    given kernel, returns an error code
+*/
+cl_int dt_opencl_local_buffer_opt(const int devid,
+                                  const int kernel,
+                                  dt_opencl_local_buffer_t *factors);
 
 /** utility functions handling device specific properties */
 void dt_opencl_write_device_config(const int devid);

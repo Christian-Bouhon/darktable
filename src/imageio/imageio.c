@@ -852,7 +852,7 @@ gboolean dt_imageio_has_mono_preview(const char *filename)
 
   dt_print(DT_DEBUG_IMAGEIO,
            "[dt_imageio_has_mono_preview] testing `%s', monochrome=%s, %ix%i",
-           filename, mono ? "YES" : "FALSE", thumb_width, thumb_height);
+           filename, STR_YESNO(mono), thumb_width, thumb_height);
   dt_free_align(tmp);
   return mono;
 }
@@ -1145,6 +1145,28 @@ gboolean dt_imageio_export_with_flags(const dt_imgid_t imgid,
 
     dt_ioppr_update_for_style_items(&dev, style_items, appending);
 
+    if(style_items)
+    {
+      // now let's deal with the iop-order (possibly merging style & dev lists)
+      GList *iop_list = dt_styles_module_order_list(format_params->style);
+
+      if(iop_list)
+      {
+        // the style has an iop-order, we need to merge the
+        // multi-instance from dev image. Get dev image iop-order:
+        GList *img_iop_order_list = dev.iop_order_list;;
+        // Get multi-instance modules if any:
+        GList *mi = dt_ioppr_extract_multi_instances_list(img_iop_order_list);
+        // If some where found merge them with the style list
+        if(mi) iop_list = dt_ioppr_merge_multi_instance_iop_order_list(iop_list, mi);
+        // finally we have the final list for the image, use it:
+        dev.iop_order_list = iop_list;
+
+        g_list_free_full(img_iop_order_list, g_free);
+        g_list_free_full(mi, g_free);
+      }
+    }
+
     for(GList *st_items = style_items; st_items; st_items = g_list_next(st_items))
     {
       dt_style_item_t *st_item = st_items->data;
@@ -1294,6 +1316,10 @@ gboolean dt_imageio_export_with_flags(const dt_imgid_t imgid,
 
   const int processed_width = floor(scale * pipe.processed_width);
   const int processed_height = floor(scale * pipe.processed_height);
+  if(scale == max_scale && !thumbnail_export)
+    dt_control_log(_("export reduced to %dx%d because of memory restrictions"),
+            processed_width, processed_height);
+
   const gboolean size_warning = processed_width < 1 || processed_height < 1;
   dt_print(DT_DEBUG_IMAGEIO,
            "[dt_imageio_export] %s%s imgid %d, %ix%i --> %ix%i (scale=%.4f, maxscale=%.4f)."
@@ -1302,8 +1328,8 @@ gboolean dt_imageio_export_with_flags(const dt_imgid_t imgid,
            thumbnail_export ? "thumbnail" : "export", imgid,
            pipe.processed_width, pipe.processed_height,
            processed_width, processed_height, scale, max_scale,
-           upscale ? "yes" : "no",
-           high_quality_processing || scale > 1.0f ? "yes" : "no",
+           STR_YESNO(upscale),
+           STR_YESNO(high_quality_processing || scale > 1.0f),
            dt_check_gimpmode("file") ? " GIMP" : "");
 
   const int bpp = format->bpp(format_params);

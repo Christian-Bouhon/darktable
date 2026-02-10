@@ -115,17 +115,17 @@ typedef struct dt_iop_agx_params_t
   // Corresponds to p_y, but not directly -- needs application of gamma
   float curve_pivot_y_linear_output;      // $MIN: 0.f $MAX: 1.f $DEFAULT: 0.18f $DESCRIPTION: "pivot target output"
   // P_slope
-  float curve_contrast_around_pivot;      // $MIN: 0.1f $MAX: 10.f $DEFAULT: 2.4f $DESCRIPTION: "contrast"
+  float curve_contrast_around_pivot;      // $MIN: 0.1f $MAX: 10.f $DEFAULT: 2.8f $DESCRIPTION: "contrast"
   // related to P_tlength; the number expresses the portion of the y range below the pivot
   float curve_linear_ratio_below_pivot;   // $MIN: 0.f $MAX: 1.f $DEFAULT: 0.f $DESCRIPTION: "toe start"
   // related to P_slength; the number expresses the portion of the y range below the pivot
   float curve_linear_ratio_above_pivot;   // $MIN: 0.f $MAX: 1.f $DEFAULT: 0.f $DESCRIPTION: "shoulder start"
   // t_p
-  float curve_toe_power;                  // $MIN: 0.f $MAX: 10.f $DEFAULT: 1.5f $DESCRIPTION: "toe power"
+  float curve_toe_power;                  // $MIN: 0.f $MAX: 10.f $DEFAULT: 1.55f $DESCRIPTION: "toe power"
   // s_p
-  float curve_shoulder_power;             // $MIN: 0.f $MAX: 10.f $DEFAULT: 1.5f $DESCRIPTION: "shoulder power"
+  float curve_shoulder_power;             // $MIN: 0.f $MAX: 10.f $DEFAULT: 1.55f $DESCRIPTION: "shoulder power"
   float curve_gamma;                      // $MIN: 0.01f $MAX: 100.f $DEFAULT: 2.2f $DESCRIPTION: "curve y gamma"
-  gboolean auto_gamma;                    // $MIN: 0.f $MAX: 1.f $DEFAULT: 0.f $DESCRIPTION: "keep the pivot on the diagonal"
+  gboolean auto_gamma;                    // $DEFAULT: FALSE $DESCRIPTION: "keep the pivot on the diagonal"
   // t_ly
   float curve_target_display_black_ratio; // $MIN: 0.f $MAX: 0.15f $DEFAULT: 0.f $DESCRIPTION: "target black"
   // s_ly
@@ -133,7 +133,7 @@ typedef struct dt_iop_agx_params_t
 
   // custom primaries; rotation limits below: +/- 0.5236 radian => +/- 30 degrees
   dt_iop_agx_base_primaries_t base_primaries; // $DEFAULT: DT_AGX_REC2020 $DESCRIPTION: "base primaries"
-  gboolean disable_primaries_adjustments; // $MIN: 0.f $MAX: 1.f $DEFAULT: 0.f $DESCRIPTION: "disable adjustments"
+  gboolean disable_primaries_adjustments; // $DEFAULT: FALSE $DESCRIPTION: "disable adjustments"
   float red_inset;        // $MIN:  0.f  $MAX: 0.99f $DEFAULT: 0.f $DESCRIPTION: "red attenuation"
   float red_rotation;     // $MIN: -0.5236f $MAX: 0.5236f  $DEFAULT: 0.f $DESCRIPTION: "red rotation"
   float green_inset;      // $MIN:  0.f  $MAX: 0.99f $DEFAULT: 0.f $DESCRIPTION: "green attenuation"
@@ -151,7 +151,7 @@ typedef struct dt_iop_agx_params_t
   float blue_unrotation;         // $MIN: -0.5236f $MAX: 0.5236f  $DEFAULT: 0.f $DESCRIPTION: "blue reverse rotation"
 
   // v5
-  gboolean completely_reverse_primaries; // $DEFAULT: 0 $DESCRIPTION: "reverse all"
+  gboolean completely_reverse_primaries; // $DEFAULT: FALSE $DESCRIPTION: "reverse all"
 } dt_iop_agx_params_t;
 
 typedef struct dt_iop_basic_curve_controls_t
@@ -1298,7 +1298,7 @@ static void _create_matrices(const primaries_params_t *params,
   // the start of the process.  Its inverse (see the next steps), when
   // applied to RGB values in the curve's working space (which
   // actually uses the base primaries), will undo the rotation and,
-  // depending on purity, push colours further from achromatic,
+  // depending on purity, push colors further from achromatic,
   // resaturating them.
   dt_colormatrix_t outset_and_unrotated_to_xyz_transposed;
   dt_make_transposed_matrices_from_primaries_and_whitepoint
@@ -1313,7 +1313,7 @@ static void _create_matrices(const primaries_params_t *params,
 
   // 'tmp' is constructed the same way as
   // inbound_inset_and_rotated_to_xyz_transposed, but this matrix will
-  // be used to remap colours to the 'base' profile, so we need to
+  // be used to remap colors to the 'base' profile, so we need to
   // invert it.
   dt_colormatrix_t rendering_to_base_transposed;
   mat3SSEinv(rendering_to_base_transposed, tmp);
@@ -1829,7 +1829,6 @@ static GtkWidget* _create_basic_curve_controls_box(dt_iop_module_t *self,
   dt_bauhaus_slider_set_format(slider, "%");
   dt_bauhaus_slider_set_digits(slider, 2);
   dt_bauhaus_slider_set_factor(slider, 100.f);
-  dt_bauhaus_slider_set_soft_range(slider, 0.f, 1.f);
   gtk_widget_set_tooltip_text(slider, _("darken or brighten the pivot (linear output power)"));
   dt_bauhaus_widget_set_quad_tooltip(slider, _("the average luminance of the selected region will be\n"
                                                "used to set the pivot relative to mid-gray,\n"
@@ -1850,14 +1849,15 @@ static GtkWidget* _create_basic_curve_controls_box(dt_iop_module_t *self,
                                         "higher values keep the slope nearly constant for longer,\n"
                                         "at the cost of a more sudden drop near white"));
   dt_bauhaus_widget_set_quad_tooltip(slider,
-                              _("the curve has lost its 'S' shape, shoulder power cannot be applied.\n"
-                                "without inverting the shoulder (forcing it to bend upwards), it would be\n"
-                                "impossible to reach target white with the selected contrast and pivot position.\n"
-                                "increase contrast, move the pivot higher (increase pivot target output\n"
-                                "or curve y gamma), or increase the distance between the pivot and the right\n"
-                                "edge (decrease the pivot shift, move the white point farther from the pivot by\n"
-                                "increasing relative white exposure or move the black point closer to the pivot\n"
-                                "by lowering relative black exposure)."));
+                              _("shoulder power cannot be applied because the curve has lost its 'S' shape\n"
+                                "due to the current settings for white relative exposure, contrast, and pivot.\n"
+                                "to re-enable, do one of the following:\n"
+                                " - increase contrast\n"
+                                " - increase pivot target output\n"
+                                " - increase white relative exposure\n"
+                                " - increase curve y gamma (in the advanced curve parmeters section)\n"
+                                "\n"
+                                "open the 'show curve' section to see the effects of the above settings."));
 
   // curve_toe_power
   slider = dt_bauhaus_slider_from_params(section, "curve_toe_power");
@@ -1867,14 +1867,15 @@ static GtkWidget* _create_basic_curve_controls_box(dt_iop_module_t *self,
                                         "higher values keep the slope nearly constant for longer,\n"
                                         "at the cost of a more sudden drop near black"));
   dt_bauhaus_widget_set_quad_tooltip(slider,
-                              _("the curve has lost its 'S' shape, toe power cannot be applied.\n"
-                                "without inverting the toe (forcing it to bend downwards), it would be\n"
-                                "impossible to reach target black with the selected contrast and pivot position.\n"
-                                "increase contrast, move the pivot lower (reduce the pivot target output or\n"
-                                "curve y gamma), or increase the distance between the pivot and the left edge\n"
-                                "(increase the pivot shift, move the black point farther from the pivot by raising\n"
-                                "the relative black exposure or move the white point closer to the pivot\n"
-                                "by decreasing relative white exposure)."));
+                              _("toe power cannot be applied because the curve has lost its 'S' shape due\n"
+                                "to the current settings for white relative exposure, contrast, and pivot.\n"
+                                "to re-enable, do one of the following:\n"
+                                " - increase contrast\n"
+                                " - decrease pivot target output\n"
+                                " - decrease black relative exposure (make more negative)\n"
+                                " - decrease curve y gamma (in the advanced curve parmeters section)\n"
+                                "\n"
+                                "open the 'show curve' section to see the effects of the above settings."));
 
   return box;
 }
@@ -1908,7 +1909,6 @@ static void _add_look_sliders(dt_iop_module_t *section)
   dt_bauhaus_slider_set_format(slider, "%");
   dt_bauhaus_slider_set_digits(slider, 2);
   dt_bauhaus_slider_set_factor(slider, 100.f);
-  dt_bauhaus_slider_set_soft_range(slider, 0.f, 1.f);
   gtk_widget_set_tooltip_text(slider, _("increase to bring hues closer to the original"));
 }
 
@@ -1975,7 +1975,6 @@ static GtkWidget* _create_advanced_box(dt_iop_module_t *self,
 
   // Shoulder length
   slider = dt_bauhaus_slider_from_params(section, "curve_linear_ratio_above_pivot");
-  dt_bauhaus_slider_set_soft_range(slider, 0.f, 1.f);
   dt_bauhaus_slider_set_format(slider, "%");
   dt_bauhaus_slider_set_digits(slider, 2);
   dt_bauhaus_slider_set_factor(slider, 100.f);
@@ -1993,7 +1992,6 @@ static GtkWidget* _create_advanced_box(dt_iop_module_t *self,
 
   // Toe length
   slider = dt_bauhaus_slider_from_params(section, "curve_linear_ratio_below_pivot");
-  dt_bauhaus_slider_set_soft_range(slider, 0.f, 1.f);
   dt_bauhaus_slider_set_format(slider, "%");
   dt_bauhaus_slider_set_digits(slider, 2);
   dt_bauhaus_slider_set_factor(slider, 100.f);
@@ -2275,6 +2273,8 @@ static void _create_primaries_page(dt_iop_module_t *main,
   GtkWidget *primaries_button = dtgtk_button_new(dtgtk_cairo_paint_styles, 0, NULL);
   gtk_widget_set_tooltip_text(primaries_button, _("reset primaries to a predefined configuration"));
   g_signal_connect(primaries_button, "clicked", G_CALLBACK(_primaries_popupmenu_callback), main);
+  dt_action_define_iop(main, NULL, N_("reset primaries"),
+                       primaries_button, &dt_action_def_button);
 
   g->primaries_controls_vbox = dt_gui_vbox(dt_gui_hbox(dt_ui_label_new(_("reset primaries")),
                                                        dt_gui_align_right(primaries_button)));
@@ -2344,6 +2344,8 @@ static void _create_primaries_page(dt_iop_module_t *main,
                               _("set parameters to completely reverse primaries modifications,\n"
                                   "but allow subsequent editing"));
   g_signal_connect(g->set_post_curve_primaries_from_pre_button, "clicked", G_CALLBACK(_set_post_curve_primaries_from_pre_callback), main);
+  dt_action_define_iop(main, NULL, N_("reverse pre-mapping primaries"),
+                       g->set_post_curve_primaries_from_pre_button, &dt_action_def_button);
   dt_gui_box_add(reversal_hbox, dt_gui_align_right(g->set_post_curve_primaries_from_pre_button));
 
   self->widget = g->post_curve_primaries_controls_vbox;
@@ -2569,7 +2571,6 @@ void init_presets(dt_iop_module_so_t *self)
   dt_gui_presets_add_generic(_("blender-like|base"),
                              self->op, self->version(), &p, sizeof(p),
                              TRUE, DEVELOP_BLEND_CS_RGB_SCENE);
-
 
   _make_punchy(&p);
   dt_gui_presets_add_generic(_("blender-like|punchy"),

@@ -1,6 +1,6 @@
 /*
     This file is part of darktable,
-    Copyright (C) 2009-2025 darktable developers.
+    Copyright (C) 2009-2026 darktable developers.
 
     darktable is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -50,6 +50,7 @@
 #include <gdk/gdkkeysyms.h>
 #ifdef GDK_WINDOWING_WAYLAND
 #include <gdk/gdkwayland.h>
+#include <wayland-client.h>
 #endif
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
@@ -755,10 +756,10 @@ static gboolean _borders_scrolled(GtkWidget *widget,
   return TRUE;
 }
 
-static gboolean _scrollbar_changed(GtkWidget *widget,
-                                   gpointer user_data)
+static void _scrollbar_changed(GtkWidget *widget,
+                               gpointer user_data)
 {
-  if(darktable.gui->reset) return FALSE;
+  if(darktable.gui->reset) return;
 
   GtkAdjustment *adjustment_x =
     gtk_range_get_adjustment(GTK_RANGE(darktable.gui->scrollbars.hscrollbar));
@@ -769,8 +770,6 @@ static gboolean _scrollbar_changed(GtkWidget *widget,
   const gdouble value_y = gtk_adjustment_get_value(adjustment_y);
 
   dt_view_manager_scrollbar_changed(darktable.view_manager, value_x, value_y);
-
-  return TRUE;
 }
 
 gboolean _valid_window_placement(const gint saved_x,
@@ -1004,6 +1003,47 @@ dt_gui_session_type_t dt_gui_get_session_type(void)
 #else
   return DT_GUI_SESSION_UNKNOWN;
 #endif
+}
+
+#ifdef GDK_WINDOWING_WAYLAND
+static gboolean _wayland_ssd_support;
+
+static void _reg_global(void *data, struct wl_registry *reg,
+                       uint32_t name, const char *iface, uint32_t version)
+{
+  if (g_strcmp0(iface, "zxdg_decoration_manager_v1") == 0)
+    _wayland_ssd_support = TRUE;
+}
+
+static const struct wl_registry_listener reg_listener = {
+  .global = _reg_global,
+  // it is highly unlikely that decoration manager will disappear
+  .global_remove = NULL
+};
+#endif
+
+// does display server suport windows with server-side decorations (SSD)?
+static gboolean _check_ssd_support(void)
+{
+#ifdef GDK_WINDOWING_WAYLAND
+  // servers which support SSD (e.g. Plasma/KWin but not Gnome/Mutter)
+  // have xdg-decoration-unstable-v1 protocol in registery
+  if(dt_gui_get_session_type() == DT_GUI_SESSION_WAYLAND)
+  {
+    GdkDisplay* disp = gdk_display_get_default();
+    struct wl_display *wd = gdk_wayland_display_get_wl_display(disp);
+    struct wl_registry *reg = wl_display_get_registry(wd);
+    wl_registry_add_listener(reg, &reg_listener, NULL);
+    // receive the globals
+    wl_display_roundtrip(wd);
+    return _wayland_ssd_support;
+  }
+  else
+#endif
+  {
+    // X11, MacOS, and Windows can handle SSD
+    return TRUE;
+  }
 }
 
 static gboolean _configure(GtkWidget *da,
@@ -1381,10 +1421,10 @@ int dt_gui_gtk_init(dt_gui_gtk_t *gui)
   gtkosx_application_set_window_menu(OSXApp, GTK_MENU_ITEM(window_root_menu));
   gtkosx_application_set_help_menu(OSXApp, GTK_MENU_ITEM(help_root_menu));
 
-  g_signal_connect(G_OBJECT(OSXApp), "NSApplicationBlockTermination",
-                   G_CALLBACK(_osx_quit_callback), NULL);
-  g_signal_connect(G_OBJECT(OSXApp), "NSApplicationOpenFile",
-                   G_CALLBACK(_osx_openfile_callback), NULL);
+  g_signal_connect_data(G_OBJECT(OSXApp), "NSApplicationBlockTermination",
+                        G_CALLBACK(_osx_quit_callback), NULL, NULL, 0);
+  g_signal_connect_data(G_OBJECT(OSXApp), "NSApplicationOpenFile",
+                        G_CALLBACK(_osx_openfile_callback), NULL, NULL, 0);
 #endif
 
 #ifdef _WIN32
@@ -1748,24 +1788,24 @@ static void _init_widgets(dt_gui_gtk_t *gui)
   gtk_widget_set_name(widget, "main_window");
   gui->ui->main_window = widget;
 
-#ifdef GDK_WINDOWING_WAYLAND
-  if(dt_gui_get_session_type() == DT_GUI_SESSION_WAYLAND)
+  if(!_check_ssd_support())
   {
-    // On Wayland, use NORMAL hint to allow proper window resizing
-    gtk_window_set_type_hint(GTK_WINDOW(widget), GDK_WINDOW_TYPE_HINT_NORMAL);
-
+    // if must use client-side decoration (CSD), set up custom
+    // titlebar which allows for hiding that titlebar in maximized
+    // windows when using an extensions such as Unite
     GtkWidget *header_bar = gtk_header_bar_new();
     gtk_header_bar_set_title(GTK_HEADER_BAR(header_bar), "darktable");
     gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header_bar), TRUE);
     gtk_window_set_titlebar(GTK_WINDOW(widget), header_bar);
     gtk_widget_show(header_bar);
   }
-#endif
 
   dt_configure_ppd_dpi(gui);
 
   gtk_window_set_default_size(GTK_WINDOW(widget),
                               DT_PIXEL_APPLY_DPI(900), DT_PIXEL_APPLY_DPI(500));
+  // allows for proper window resizing
+  gtk_window_set_type_hint(GTK_WINDOW(widget), GDK_WINDOW_TYPE_HINT_NORMAL);
 
   gtk_window_set_icon_name(GTK_WINDOW(widget), "darktable");
   gtk_window_set_title(GTK_WINDOW(widget), "darktable");
@@ -3083,7 +3123,7 @@ gboolean dt_gui_show_standalone_yes_no_dialog(const char *title,
   gtk_widget_show_all(window);
 
   // to prevent the splash screen from hiding the yes/no dialog
-  darktable_splash_screen_destroy();
+  dt_splash_screen_destroy();
 
   gtk_window_set_keep_above(GTK_WINDOW(window), TRUE);
   gtk_main();
@@ -4470,10 +4510,10 @@ GtkGestureSingle *(dt_gui_connect_click)(GtkWidget *widget,
   // GTK4 GtkGesture *gesture = gtk_gesture_click_new();
   //      gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(gesture));
 
-  if(pressed) g_signal_connect(gesture, "pressed", pressed, data);
+  if(pressed) g_signal_connect(gesture, "pressed", G_CALLBACK(pressed), data);
   if(released)
   {
-    g_signal_connect(gesture, "released", released, data);
+    g_signal_connect(gesture, "released", G_CALLBACK(released), data);
     g_signal_connect(gesture, "cancel", G_CALLBACK(_gesture_cancel), NULL);
   }
 
@@ -4493,9 +4533,9 @@ GtkEventController *(dt_gui_connect_motion)(GtkWidget *widget,
 
   gtk_widget_add_events(widget, GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK); // still needed for now by _main_do_event_keymap
 
-  if(motion) g_signal_connect(controller, "motion", motion, data);
-  if(enter) g_signal_connect(controller, "enter", enter, data);
-  if(leave) g_signal_connect(controller, "leave", leave, data);
+  if(motion) g_signal_connect(controller, "motion", G_CALLBACK(motion), data);
+  if(enter) g_signal_connect(controller, "enter", G_CALLBACK(enter), data);
+  if(leave) g_signal_connect(controller, "leave", G_CALLBACK(leave), data);
 
   return controller;
 }
@@ -4541,7 +4581,6 @@ void dt_gui_cursor_clear_busy()
       GtkWidget *toplevel = darktable.gui->ui->main_window;
       GdkWindow *window = gtk_widget_get_window(toplevel);
       gdk_window_set_cursor(window, busy_prev_cursor);
-      dt_gui_process_events();
       g_object_unref(busy_prev_cursor);
       busy_prev_cursor = NULL;
       dt_control_allow_change_cursor();
@@ -4554,7 +4593,7 @@ void dt_gui_process_events()
 {
   // process pending Gtk/GDK events; we need to limit the total calls because once the LUA
   // interpreeter starts the script installer we would end up in an infinite loop
-  unsigned max_iter = 200;
+  unsigned max_iter = 1000;
   while(g_main_context_iteration(NULL, FALSE) && --max_iter > 0)
     continue;
 }

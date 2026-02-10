@@ -152,11 +152,7 @@ static void _get_zoom_pos_bnd(dt_dev_viewport_t *port,
 
 void init(dt_view_t *self)
 {
-  dt_develop_t *dev = malloc(sizeof(dt_develop_t));
-  self->data = darktable.develop = dev;
-
-  dt_dev_init(dev, TRUE);
-
+  self->data = darktable.develop;
   darktable.view_manager->proxy.darkroom.view = self;
 
 #ifdef USE_LUA
@@ -1113,6 +1109,8 @@ static gboolean _dev_load_requested_image(gpointer user_data)
         LUA_ASYNC_TYPENAME, "dt_lua_image_t", GINT_TO_POINTER(old_imgid),
         LUA_ASYNC_DONE);
 #endif
+    // update the lighttable metadata_view with any changes
+    DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_METADATA_CHANGED);
   }
 
   // clean the undo list
@@ -2444,6 +2442,10 @@ void connect_button_press_release(GtkWidget *w, GtkWidget *p)
 void gui_init(dt_view_t *self)
 {
   dt_develop_t *dev = self->data;
+  dev->full.ppd = darktable.gui->ppd;
+  dev->full.dpi = darktable.gui->dpi;
+  dev->full.dpi_factor = darktable.gui->dpi_factor;
+  dev->full.widget = dt_ui_center(darktable.gui->ui);
 
   dt_action_t *sa = &self->actions, *ac = NULL;
 
@@ -3200,6 +3202,8 @@ void leave(dt_view_t *self)
         LUA_ASYNC_TYPENAME, "dt_lua_image_t", GINT_TO_POINTER(imgid),
         LUA_ASYNC_DONE);
 #endif
+    // update the lighttable metadata_view with any changes
+    DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_METADATA_CHANGED);
   }
   else
     dt_image_synch_xmp(imgid);
@@ -3356,7 +3360,7 @@ void mouse_moved(dt_view_t *self,
 
     if(sample->size == DT_LIB_COLORPICKER_SIZE_BOX)
     {
-      float corner[2];
+      dt_pickerpoint_t corner;
       dt_color_picker_transform_box(dev, 1, sample->point, corner, TRUE);
 
       pbox[0] = MAX(0.0, MIN(corner[0], zoom_x) - delta_x);
@@ -3519,6 +3523,26 @@ int button_pressed(dt_view_t *self,
     const int procw = dev->preview_pipe->backbuf_width;
     const int proch = dev->preview_pipe->backbuf_height;
 
+    // For a Ctrl+Click we do change the color picker from/to area <-> point
+    if(which == GDK_BUTTON_PRIMARY
+       && dt_modifier_is(state, GDK_CONTROL_MASK))
+    {
+      if(sample->size == DT_LIB_COLORPICKER_SIZE_POINT)
+      {
+        // dt_lib_colorpicker_reset_box_area(sample->box);
+        dt_lib_colorpicker_set_box_area(darktable.lib, sample->box);
+      }
+      else if(sample->size == DT_LIB_COLORPICKER_SIZE_BOX)
+      {
+        dt_lib_colorpicker_set_point(darktable.lib, sample->point);
+      }
+
+      dev->preview_pipe->status = DT_DEV_PIXELPIPE_DIRTY;
+      dt_control_queue_redraw_center();
+
+      return 1;
+    }
+
     if(which == GDK_BUTTON_PRIMARY)
     {
       _get_zoom_pos(&dev->full, x, y, &zoom_x, &zoom_y, &zoom_scale);
@@ -3607,11 +3631,8 @@ int button_pressed(dt_view_t *self,
       }
       if(sample->size == DT_LIB_COLORPICKER_SIZE_BOX)
       {
-        // default is hardcoded this way
-        // FIXME: color_pixer_proxy should have an dt_iop_color_picker_clear_area() function for this
-        dt_boundingbox_t reset = { 0.02f, 0.02f, 0.98f, 0.98f };
         dt_pickerbox_t box;
-        dt_color_picker_backtransform_box(dev, 2, reset, box);
+        dt_lib_colorpicker_reset_box_area(box);
         dt_lib_colorpicker_set_box_area(darktable.lib, box);
         dev->preview_pipe->status = DT_DEV_PIXELPIPE_DIRTY;
         dt_control_queue_redraw_center();

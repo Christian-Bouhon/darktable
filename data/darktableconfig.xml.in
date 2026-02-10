@@ -1349,6 +1349,8 @@
         <option>WQXGA</option>
         <option>4K</option>
         <option>5K</option>
+        <option>6K</option>
+        <option>8K</option>
         <option>never</option>
       </enum>
     </type>
@@ -1368,6 +1370,8 @@
         <option>WQXGA</option>
         <option>4K</option>
         <option>5K</option>
+        <option>6K</option>
+        <option>8K</option>
         <option>never</option>
       </enum>
     </type>
@@ -1408,6 +1412,8 @@
         <option>WQXGA</option>
         <option>4K</option>
         <option>5K</option>
+        <option>6K</option>
+        <option>8K</option>
       </enum>
     </type>
     <default>never</default>
@@ -2515,20 +2521,6 @@
     <shortdescription>whether to show the compute variance mode in denoiseprofile</shortdescription>
     <longdescription>adds a mode in denoiseprofile that allows to compute the variance after the generalized anscombe transform is performed</longdescription>
   </dtconfig>
-  <dtconfig>
-    <name>preview_downsampling</name>
-    <type>
-      <enum>
-        <option>original</option>
-        <option>to 1/2</option>
-        <option>to 1/3</option>
-        <option>to 1/4</option>
-      </enum>
-    </type>
-    <default>original</default>
-    <shortdescription>reduce resolution of preview image</shortdescription>
-    <longdescription>decrease to speed up preview rendering, hinders accurate masking, pickers and some module algorithm</longdescription>
-  </dtconfig>
   <dtconfig prefs="darkroom" section="general">
     <name>darkroom/ui/loading_screen</name>
     <type>bool</type>
@@ -3628,7 +3620,7 @@
     </type>
     <default>scene-referred (sigmoid)</default>
     <shortdescription>auto-apply pixel workflow defaults</shortdescription>
-    <longdescription>scene-referred workflow is based on linear modules and will auto-apply filmic or sigmoid, color calibration and exposure,\ndisplay-referred workflow is based on Lab modules and will auto-apply base curve, white balance and the legacy module pipe order.</longdescription>
+    <longdescription>scene-referred workflow is based on linear modules and will auto-apply the corresponding tone mapper (shown in parenthesis), color calibration and exposure,\ndisplay-referred workflow is based on Lab modules and will auto-apply base curve, white balance and the legacy module pipe order.</longdescription>
   </dtconfig>
   <dtconfig prefs="processing" section="general">
     <name>plugins/darkroom/basecurve/auto_apply_percamera_presets</name>
@@ -4014,6 +4006,6 @@
     <type>string</type>
     <default></default>
     <shortdescription>order or exclude MIDI devices</shortdescription>
-    <longdescription>comma-separated list of device name fragments that if matched load MIDI device at id given by location in list\nor if preceded by '-' prevent matching devices from loading. add encoding and number of knobs like 'BeatStep:63:16'</longdescription>
+    <longdescription>comma-separated list of device name fragments that if matched load MIDI device at id given by location in list\nadd encoding and number of knobs like 'Loupedeck:127,BeatStep:63:16'\nprefix with '-' to ignore matching devices\njust '-' stops loading all further devices or on its own disables midi completely</longdescription>
   </dtconfig>
 </dtconfiglist>

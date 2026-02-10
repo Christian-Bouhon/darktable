@@ -46,6 +46,7 @@
 #include "gui/gtk.h"
 #include "gui/guides.h"
 #include "gui/presets.h"
+#include "gui/splash.h"
 #include "imageio/imageio_rawspeed.h"
 #include "libs/modulegroups.h"
 #ifdef GDK_WINDOWING_QUARTZ
@@ -875,9 +876,8 @@ static gboolean _rename_module_key_press(GtkWidget *entry,
   return FALSE; /* event not handled */
 }
 
-static gboolean _rename_module_resize(GtkWidget *entry,
-                                      GdkEventKey *event,
-                                      dt_iop_module_t *module)
+static void _rename_module_resize(GtkWidget *entry,
+                                  gpointer user)
 {
   int width = 0;
   GtkBorder padding;
@@ -887,8 +887,6 @@ static gboolean _rename_module_resize(GtkWidget *entry,
                                 gtk_widget_get_state_flags (entry),
                                 &padding);
   gtk_widget_set_size_request(entry, width + padding.left + padding.right + 1, -1);
-
-  return TRUE;
 }
 
 void dt_iop_gui_rename_module(dt_iop_module_t *module)
@@ -1684,6 +1682,14 @@ static void _init_module_so(void *m)
     if(module->gui_init
        && !dt_iop_load_module_by_so(module_instance, module, NULL))
     {
+      dt_print(DT_DEBUG_VERBOSE,
+               "loading processing module : %s",
+               module_instance->op);
+      char *msg = g_strdup_printf(_("%s: %s"),
+                                  _("loading processing modules"),
+                                  module_instance->name());
+      dt_splash_screen_set_progress(msg);
+      g_free(msg);
       dt_iop_gui_init(module_instance);
 
       static gboolean blending_accels_initialized = FALSE;
@@ -3011,7 +3017,7 @@ GtkWidget *dt_iop_gui_header_button(dt_iop_module_t *module,
   g_signal_connect(button, "enter-notify-event",
                    G_CALLBACK(_header_enter_notify_callback),
                    GINT_TO_POINTER(element));
-  g_signal_connect(button, "button-press-event", G_CALLBACK(callback), module);
+  g_signal_connect_data(button, "button-press-event", G_CALLBACK(callback), module, NULL, 0);
   dt_action_define(&module->so->actions, NULL, NULL, button, NULL);
   gtk_widget_show(button);
 

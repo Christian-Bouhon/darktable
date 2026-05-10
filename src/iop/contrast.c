@@ -17,6 +17,9 @@
 */
 
 /*
+THIS CODE IS NOT THE LATEST VERSION AND CONTAINS BUGS THAT HAVE BEEN FIXED IN THIS VERSION
+https://github.com/Christian-Bouhon/libre-dt-lab/blob/main/src/iop/contrast.c
+
 DOCUMENTATION
 This module performs advanced multi-scale contrast processing in scene-referred linear RGB space, 
 designed for wide-gamut workflows in any linear RGB working space.

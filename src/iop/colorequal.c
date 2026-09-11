@@ -2388,6 +2388,31 @@ static inline float _get_hueval(const float hue)
   return b < 0.0f ? b + 1.0f : b;
 }
 
+// The picker samples in JzCzHz, but the graph axis and the under-cursor
+// indicator are both built on darktable UCS hue (see
+// _conventional_hue_deg_to_ucs_rad). sRGB red does not sit at the same angle in
+// the two spaces, so using the JzCzHz hue directly puts the picker line about
+// 15° away from the cursor line on the same pixel. Convert the picked colour
+// back to UCS and reuse the cursor's ANGLE_SHIFT mapping so both agree on
+// red = 0°.
+static inline float _picked_hue_to_gui(const dt_aligned_pixel_t JzCzhz)
+{
+  dt_aligned_pixel_t JzAzBz = { JzCzhz[0],
+                                JzCzhz[1] * cosf(DT_2PI_F * JzCzhz[2]),
+                                JzCzhz[1] * sinf(DT_2PI_F * JzCzhz[2]),
+                                0.0f };
+  dt_aligned_pixel_t XYZ_D65 = { 0.0f, 0.0f, 0.0f, 0.0f };
+  dt_aligned_pixel_t xyY = { 0.0f, 0.0f, 0.0f, 0.0f };
+  dt_aligned_pixel_t JCH = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+  dt_JzAzBz_2_XYZ(JzAzBz, XYZ_D65);
+  dt_D65_XYZ_to_xyY(XYZ_D65, xyY);
+  xyY_to_dt_UCS_JCH(xyY, 1.0f, JCH);
+
+  // the hue does not depend on L_white, so any positive value works here
+  return _get_hueval(JCH[2] / DT_2PI_F);
+}
+
 static void _draw_color_picker(const dt_iop_module_t *self,
                                cairo_t *cr,
                                dt_iop_colorequal_params_t *p,
@@ -2401,9 +2426,9 @@ static void _draw_color_picker(const dt_iop_module_t *self,
 
   float mean_alpha = 0.6f;
 
-  float hav  = self->picked_color[2];
-  float hmax = self->picked_color_max[2];
-  float hmin = self->picked_color_min[2];
+  float hav  = _picked_hue_to_gui(self->picked_color);
+  float hmax = _picked_hue_to_gui(self->picked_color_max);
+  float hmin = _picked_hue_to_gui(self->picked_color_min);
 
   const float hava  = self->picked_color[3];
   const float hmina = self->picked_color_min[3];
@@ -2416,8 +2441,8 @@ static void _draw_color_picker(const dt_iop_module_t *self,
     hav  = hava < 0.5f  ? hava + 0.5f   : hava - 0.5f;
   }
 
-  const float xmin = width * _get_hueval(hmin);
-  const float xmax = width * _get_hueval(hmax);
+  const float xmin = width * hmin;
+  const float xmax = width * hmax;
   if(xmax != xmin)
   {
     cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.3);
@@ -2433,7 +2458,7 @@ static void _draw_color_picker(const dt_iop_module_t *self,
   }
 
   cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, mean_alpha);
-  const float xav = width * _get_hueval(hav);
+  const float xav = width * hav;
   cairo_move_to(cr, xav, 0.0);
   cairo_line_to(cr, xav, height);
   cairo_stroke(cr);
@@ -2634,7 +2659,7 @@ static gboolean _iop_colorequalizer_draw(GtkWidget *widget,
   // shifted by hue_shift, so the hue is mapped directly to x.
   if(self->enabled && g->cursor_valid)
   {
-    float x_cursor = (g->cursor_hue / 360.0f + dx) * graph_width;
+    float x_cursor = (g->cursor_hue / 360.0f) * graph_width;
     x_cursor = fmodf(x_cursor, graph_width); // hue is periodic
     if(x_cursor < 0.0f) x_cursor += graph_width;
 

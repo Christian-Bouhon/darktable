@@ -323,6 +323,14 @@ typedef struct dt_iop_spektrafilm_params_t
      reference has the same switch (io.output_gamut_compress.algorithm, which
      takes "off"), so this is the model's own setting and not an addition.
 
+     Note that the compressor is two knees, not one, and this switch gates
+     both: a chroma knee towards the output profile's boundary, and a
+     lightness knee on OkLab L from 0.7 upwards (SF_OUT_LIGHT_T/_L/_P in
+     spektra_sim.c). Switching it off therefore lets the highlights run
+     brighter as well as letting saturated colours leave the profile, which
+     is worth spelling out wherever this control is described -- the
+     brightness half is the one users do not expect from the name.
+
      Appended at the end of the struct: legacy_params() copies an older prefix
      and leaves the tail at its default, so anything added later goes here. */
   gboolean gamut_compress;     // $DEFAULT: TRUE $DESCRIPTION: "gamut compression"
@@ -3090,14 +3098,25 @@ static const sf_prof_entry_t *_auto_paper_entry(const dt_iop_spektrafilm_gui_dat
                                                 const sf_prof_entry_t *film)
 {
   const sf_prof_entry_t *first = NULL;
+  const sf_prof_entry_t *same_channel = NULL;
   for(const GList *l = g->entries; l; l = l->next)
   {
     const sf_prof_entry_t *pe = l->data;
     if(!pe->printing) continue;
     if(!first) first = pe;
+    if(film && !same_channel && pe->bw == film->bw) same_channel = pe;
     if(film && film->target_print[0] && !strcmp(pe->stock, film->target_print)) return pe;
   }
-  return first;
+  /* Three tiers, in order: the film's own named target print, then any print
+     stock with the same channel model, then the first printing entry there is.
+     The channel-model tier matters because target_print is optional in the pack
+     and the entry list is sorted by display name, so the first printing entry
+     bears no relation to the film -- for a black-and-white negative it is a
+     colour paper. Stocks that name no target and print nonetheless are rare
+     (kodak_doublex is the one in the current pack; the other untargeted stocks
+     are positives, which force scan_film and skip the print stage), so the last
+     tier is only reached when nothing in the pack matches at all. */
+  return same_channel ? same_channel : first;
 }
 
 /* Name the resolved paper in the "auto" entry itself, not only in the
@@ -4946,13 +4965,19 @@ void gui_init(dt_iop_module_t *self)
   g->gamut_compress = dt_bauhaus_toggle_from_params(self, "gamut_compress");
   gtk_widget_set_tooltip_text(
       g->gamut_compress,
-      _("pull colours the output profile cannot hold back inside it, along a\n"
-        "curve that leaves everything already inside untouched.\n"
+      _("pull what the output profile cannot hold back inside it, along\n"
+        "curves that leave everything already inside untouched. this is two\n"
+        "knees: chroma towards the profile's boundary, and lightness from\n"
+        "the upper midtones up, which rolls the highlights off to white.\n"
         "\n"
         "switching it off shows where the film is producing colours the\n"
         "profile has no room for: they leave the range, so darktable's\n"
         "clipping indicator marks them and the raw extent of the overshoot\n"
-        "is visible.\n"
+        "is visible. the highlights stop rolling off and reach further at\n"
+        "the same time, since the lightness knee goes away with the rest.\n"
+        "to place the highlights without losing the rolloff, use the\n"
+        "pre-compression boost and post-compression scale on the scanner\n"
+        "tab instead.\n"
         "\n"
         "leave it on for an image you intend to keep. off, saturated colours\n"
         "are clipped by whatever comes next in the pipeline, which loses the\n"
